@@ -59,6 +59,11 @@ When sources disagree, prefer them in this order:
   linux x86_64 (sting or honey), which is the platform CI checks them on.
 - **CI runs Bazel with `--ignore_all_rc_files`.** Nothing a CI target needs
   may live in `.bazelrc`.
+- **The C toolchain is pinned Nix, never the host's (R-C416).** Linux x86_64
+  builds use `//tools/cc` (zig cc from the flake.lock nixpkgs, fixed target
+  `x86_64-linux-gnu.2.34`), registered in `MODULE.bazel`. Bazel needs
+  `nix-build` on PATH; no host gcc is needed or used. Change
+  `tools/cc/nixpkgs.nix` only together with `flake.lock`.
 
 ## Formal spec (R-C229)
 

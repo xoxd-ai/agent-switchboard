@@ -80,8 +80,7 @@ recorded below.
   `nix develop` leaking into rules_cc). The image carries
   `org.opencontainers.image.source` and an `org.opencontainers.image.revision`
   label from `--embed_label=<sha>` (`just image` passes HEAD; without it the
-  value is `unstamped`). Build the release image outside `nix develop`, or
-  from a `mkShellNoCC` shell. These change the protected inputs; the file set
+  value is `unstamped`). These change the protected inputs; the file set
   stays at 27 paths.
 - **Release revision label (TIN-4655, comment 3126a35f).** The label is part
   of the digest, and `release-check` lets the tag sit on a descendant of the
@@ -112,6 +111,26 @@ recorded below.
   The tag sits on the merge of this record, not on `26f38b9a`: the workflow
   reads the record from the tagged tree and labels the image with its
   `source`.
+- **Hermetic C toolchain (R-C416, amends R-C411 and R-C282).** The v0.2.0
+  tag run (37678965278) failed with `Cannot find gcc or CC`: GloriousFlywheel
+  runners have no host C compiler, and the SWB-R57 digest embeds SQLite as
+  compiled by Sting's gcc 14.3.1. The operator chose "Hermetic toolchain"
+  (TIN-5770 comment `9b9667d2`). `MODULE.bazel` now registers
+  `//tools/cc:zig_x86_64_linux_toolchain` ahead of rules_cc's host
+  autodetection. It is zig cc 0.15.2 from the nixpkgs revision in
+  `flake.lock`, imported with rules_nixpkgs_core (`tools/cc/nixpkgs.nix`
+  pins it by NAR hash, `tools/cc/zig_cc.nix` wraps it, and
+  `//tools/cc:nixpkgs_pin_test` keeps the two pins equal). The wrapper fixes
+  the target at `x86_64-linux-gnu.2.34`: the binary links against glibc 2.34
+  stubs and asks for `/lib64/ld-linux-x86-64.so.2`, so it runs on the
+  distroless cc-debian13 base (glibc 2.41) and on the build hosts (2.39). A
+  Nix gcc-wrapper could not do this: it links Nix glibc 2.42 and writes a
+  `/nix/store` interpreter. The wrapper also turns off zig's default UBSan
+  at `-O0`, whose source locations would put `/nix/store` header paths in
+  the binary. Every Linux x86_64 build, `just check` included, now needs
+  `nix-build` on PATH and no host gcc. The image digest changes, so
+  `sha256:66e43966…` is not published; the new digest needs its own ruling
+  and record before any tag can publish it.
 
 ## Secrets scan, CODEOWNERS and tag-triggered release
 
@@ -137,14 +156,12 @@ recorded below.
      match. The approved `source` is then read once from
      `approved-broker.json` and checked to be an ancestor of HEAD;
   3. build `//deploy:image.digest` and `release-check --built-digest`: refuse
-     to push unless it equals the approved immutable digest. The build runs
-     in the `release` devShell, which is `mkShellNoCC` (R-C282): `mkShell`
-     would put the Nix gcc-wrapper in `CC` and on `PATH`, rules_cc would
-     compile libsqlite3-sys with it, and the binary would carry `/nix/store`
-     paths and a Nix dynamic linker, so the digest could never reproduce
-     (R-C268). The step also refuses if `CC`, `CXX` or `NIX_CC` is set or
-     `cc`/`gcc` resolves into `/nix/store`, and passes the approved `source`
-     as `--embed_label` so the revision label matches the approved build;
+     to push unless it equals the approved immutable digest. The C toolchain
+     is the pinned Nix zig cc from `//tools/cc` (R-C416), so the step needs
+     `nix-build` on PATH and no host compiler; it refuses if `CC` or `CXX`
+     is set, so rules_cc's host fallback stays unused, and passes the
+     approved `source` as `--embed_label` so the revision label matches the
+     approved build;
   4. `bazelisk run //deploy:push` (digest only, `packages: write` token),
      with the same approved `source` as `--embed_label`. Both Bazel steps use
      the `release` devShell's flake.lock-pinned `bazelisk` and refuse one that
@@ -157,9 +174,10 @@ recorded below.
 - `just release-check-tag TAG [MAIN_REF]` runs the step 2 gate locally.
 - The workflow writes evidence only. `publication_authorized` and
   `live_acceptance` stay false; it never edits `approved-broker.json`. Today
-  the only image it can push is the SWB-R57 digest `sha256:66e43966…`, and
-  only if the tagged tree's Bazel build reproduces it. Publishing any other image needs a new
-  ruling and a new approved release entry first.
+  the record still names the SWB-R57 digest `sha256:66e43966…`, which the
+  R-C416 toolchain no longer builds, so every tag fails closed at
+  `--built-digest` until a new digest is ratified and recorded. Publishing
+  any image needs a ruling and an approved release entry first.
 - The `v0.1.0` tag run of this workflow failed: at the time it required a
   runner-supplied `TINYLAND_CI_BAZELISK_BIN` that GloriousFlywheel runners
   did not provide. v0.1.0 was therefore published by hand under R-C312: two

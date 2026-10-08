@@ -123,8 +123,9 @@ branch type tin slug:
 # Build the immutable Linux/amd64 OCI image and print the exact manifest digest.
 # R-C268: the image's org.opencontainers.image.revision label is the commit
 # given here (default: HEAD, and then the worktree must be clean). Two builds
-# of one commit give one digest. Build outside `nix develop`: a Nix C compiler
-# in PATH leaks into rules_cc, and //deploy:swb_checked refuses that binary.
+# of one commit give one digest. The C toolchain is the pinned Nix zig cc
+# from //tools/cc (R-C416), whatever compiler the host or shell has, so
+# `nix-build` must be on PATH and no host gcc is needed.
 # For a release use `just release-image`, never the HEAD default.
 image revision="":
     #!/usr/bin/env bash

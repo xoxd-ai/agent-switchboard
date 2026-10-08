@@ -181,15 +181,13 @@
         # The tag-triggered release workflow (.github/workflows/release.yml)
         # runs its gates here: signature verification, release-check and the
         # registry readback. Bazelisk is this shell's flake.lock-pinned
-        # package (operator direction 2026-10-05): a Go binary with no C
-        # compiler, so it leaves the host-toolchain guard below intact.
-        # mkShellNoCC, not mkShell (R-C282): the Bazel image build runs in
-        # this shell, and mkShell's stdenv puts the Nix gcc-wrapper on PATH
-        # and in CC. rules_cc would then compile libsqlite3-sys with a
-        # /nix/store compiler, the binary would embed /nix/store paths and a
-        # Nix dynamic linker, and the image would not reproduce the approved
-        # digest (R-C268). Without a stdenv C compiler, Bazel uses the
-        # runner's host C toolchain, the same one the approved build used.
+        # package (operator direction 2026-10-05), a Go binary.
+        # The C toolchain is not in this shell (R-C416, amending R-C282):
+        # MODULE.bazel registers //tools/cc, a zig cc that Bazel imports
+        # through rules_nixpkgs_core from the nixpkgs pinned in
+        # tools/cc/nixpkgs.nix (this flake's nixpkgs revision), so the image
+        # build needs `nix-build` but no host gcc. mkShellNoCC keeps stdenv's
+        # gcc-wrapper out of CC and PATH, where release.yml would refuse it.
         release = pkgs.mkShellNoCC {
           packages = with pkgs; [
             bazelisk

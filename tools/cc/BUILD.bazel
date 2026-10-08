@@ -1,0 +1,103 @@
+# R-C416 (TIN-4655): the pinned Nix C toolchain.
+#
+# One C toolchain for every Linux x86_64 build, release image included:
+# zig cc from the nixpkgs pinned in nixpkgs.nix, wrapped by zig_cc.nix with a
+# fixed target (x86_64-linux-gnu.2.34). It replaces rules_cc's host
+# autodetection, so no build needs a host gcc and the image digest no longer
+# depends on the build machine's compiler (R-C282, R-C268). Registered in
+# MODULE.bazel ahead of rules_cc's local_config_cc.
+#
+# rules_rust links Rust binaries with this toolchain's link tool and hands its
+# compile tool, archiver and flags to build scripts, which is how
+# libsqlite3-sys compiles the bundled SQLite.
+
+load("@rules_cc//cc/toolchains:tool.bzl", "cc_tool")
+load("@rules_cc//cc/toolchains:tool_map.bzl", "cc_tool_map")
+load("@rules_cc//cc/toolchains:toolchain.bzl", "cc_toolchain")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "nixpkgs.nix",
+    "zig_cc.nix",
+])
+
+_LINUX_X86_64 = [
+    "@platforms//os:linux",
+    "@platforms//cpu:x86_64",
+]
+
+cc_tool(
+    name = "zig_cc",
+    src = "@swb_zig_cc//:bin/cc",
+    data = ["@swb_zig_cc//:toolchain_files"],
+)
+
+cc_tool(
+    name = "zig_cxx",
+    src = "@swb_zig_cc//:bin/c++",
+    data = ["@swb_zig_cc//:toolchain_files"],
+)
+
+cc_tool(
+    name = "zig_ar",
+    src = "@swb_zig_cc//:bin/ar",
+    data = ["@swb_zig_cc//:toolchain_files"],
+)
+
+cc_tool(
+    name = "zig_objcopy",
+    src = "@swb_zig_cc//:bin/objcopy",
+    data = ["@swb_zig_cc//:toolchain_files"],
+)
+
+cc_tool(
+    name = "zig_strip",
+    src = "@swb_zig_cc//:bin/strip",
+)
+
+# Links use the C driver, as `cc` would for rustc: the C++ driver would add
+# libc++ to every Rust link.
+cc_tool_map(
+    name = "zig_tools",
+    tools = {
+        "@rules_cc//cc/toolchains/actions:assembly_actions": ":zig_cc",
+        "@rules_cc//cc/toolchains/actions:c_compile": ":zig_cc",
+        "@rules_cc//cc/toolchains/actions:cpp_compile_actions": ":zig_cxx",
+        "@rules_cc//cc/toolchains/actions:link_actions": ":zig_cc",
+        "@rules_cc//cc/toolchains/actions:ar_actions": ":zig_ar",
+        "@rules_cc//cc/toolchains/actions:objcopy_embed_data": ":zig_objcopy",
+        "@rules_cc//cc/toolchains/actions:strip": ":zig_strip",
+    },
+)
+
+cc_toolchain(
+    name = "zig_x86_64_linux",
+    compiler = "clang",
+    enabled_features = ["@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features"],
+    known_features = ["@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features"],
+    tool_map = ":zig_tools",
+)
+
+toolchain(
+    name = "zig_x86_64_linux_toolchain",
+    exec_compatible_with = _LINUX_X86_64,
+    target_compatible_with = _LINUX_X86_64,
+    toolchain = ":zig_x86_64_linux",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)
+
+# nixpkgs.nix must name the same nixpkgs as flake.lock.
+sh_test(
+    name = "nixpkgs_pin_test",
+    srcs = ["nixpkgs_pin_test.sh"],
+    args = [
+        "$(rootpath :nixpkgs.nix)",
+        "$(rootpath //:flake.lock)",
+    ],
+    data = [
+        ":nixpkgs.nix",
+        "//:flake.lock",
+    ],
+)

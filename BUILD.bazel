@@ -8,6 +8,7 @@ exports_files([
     "Cargo.toml",
     "MODULE.bazel",
     "cargo-bazel-lock.json",
+    "flake.lock",
 ])
 
 # Every Rust target that rustfmt and clippy must cover. Keep in step with the
@@ -70,6 +71,7 @@ test_suite(
         "//crates/swb-broker:swb_broker_test_clock_test",
         "//crates/swb-proto:swb_proto_test",
         "//crates/swb-store:swb_store_test",
+        "//tools/cc:nixpkgs_pin_test",
     ],
 )
 

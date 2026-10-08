@@ -16,8 +16,10 @@ name: release
 #      to be a 40-hex ancestor of HEAD, and used as --embed_label for both the
 #      build and the push (TIN-4655 comment 3126a35f): the tag may sit on a
 #      later commit, and labelling that commit would change the digest.
-#   2. Bazel builds //deploy:image.digest with the host C toolchain (the
-#      release devShell is mkShellNoCC; R-C282) and the approved source as
+#   2. Bazel builds //deploy:image.digest with the pinned Nix C toolchain
+#      registered in MODULE.bazel (//tools/cc, zig cc from the nixpkgs in
+#      tools/cc/nixpkgs.nix; R-C416, amending R-C282), so the runner needs
+#      `nix-build` but no host C compiler, and the approved source as
 #      --embed_label (R-C268), and `release-check --built-digest`
 #      refuses unless it equals the approved immutable digest. A different
 #      image is a new publication that needs its own ruling, so nothing is
@@ -137,19 +139,18 @@ jobs:
             echo "::error::bazelisk resolves to $(readlink -f "$BAZELISK"), outside /nix/store"
             exit 1
           fi
-          # R-C282: Bazel must use the host C toolchain, never a Nix
-          # gcc-wrapper. The release devShell is mkShellNoCC; refuse here if a
-          # Nix compiler still reaches CC/CXX or PATH, because rules_cc would
-          # embed /nix/store paths and the digest could never match (R-C268).
-          for var in CC CXX NIX_CC; do
+          # R-C416 (amends R-C282): the C toolchain is the pinned Nix zig cc
+          # that MODULE.bazel registers from //tools/cc, ahead of rules_cc's
+          # host autodetection. Bazel fetches it with nix-build, so require
+          # that, and never consult a host or devShell compiler: CC/CXX would
+          # only matter to rules_cc's fallback, so refuse them rather than
+          # leave a second toolchain path open. //deploy:swb_checked still
+          # refuses a binary with a /nix/store, /execroot/ or /sandbox/ path
+          # (R-C268).
+          command -v nix-build >/dev/null || { echo "::error::nix-build is not on PATH; Bazel needs it to fetch the pinned C toolchain"; exit 1; }
+          for var in CC CXX; do
             if [[ -n "${!var:-}" ]]; then
-              echo "::error::${var} is set (${!var}); the release build must not use a Nix C compiler"
-              exit 1
-            fi
-          done
-          for tool in cc gcc c++ g++; do
-            if path="$(command -v "$tool")" && [[ "$(readlink -f "$path")" == /nix/store/* ]]; then
-              echo "::error::${tool} resolves to ${path}; the release build must use the host C toolchain"
+              echo "::error::${var} is set (${!var}); the release build uses only the pinned //tools/cc toolchain"
               exit 1
             fi
           done

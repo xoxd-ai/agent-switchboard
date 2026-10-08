@@ -10,10 +10,11 @@ _linux_amd64 = [
 
 # R-C268: refuse a shipped binary that carries a build-machine path. An
 # `/execroot/` or `/sandbox/` string is the unremapped C debug path that made
-# SWB-R53 irreproducible; a `/nix/store/` string means a Nix C compiler (for
-# example from `nix develop`) leaked into rules_cc, and that binary would ask
-# for a Nix dynamic linker the distroless base does not have. The output is a
-# byte copy, so the layer is unchanged when the check passes.
+# SWB-R53 irreproducible; a `/nix/store/` string means a toolchain path
+# reached the binary: a Nix gcc-wrapper (which would also ask for a Nix
+# dynamic linker the distroless base does not have), or zig's libc headers
+# through sanitizer source locations (R-C416 turns those off in //tools/cc).
+# The output is a byte copy, so the layer is unchanged when the check passes.
 genrule(
     name = "swb_checked",
     srcs = ["//crates/swb:swb"],
