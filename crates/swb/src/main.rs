@@ -12,7 +12,7 @@ mod channel;
 /// The release version `swb version` and the channel's `serverInfo` report.
 /// Bazel does not set CARGO_PKG_VERSION from Cargo.toml, so keep this equal
 /// to the workspace version by hand.
-const VERSION: &str = "0.2.0";
+const VERSION: &str = "0.2.1";
 const LIMIT: Duration = Duration::from_millis(1500);
 const HOOK_LIMIT: Duration = Duration::from_millis(1800);
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
