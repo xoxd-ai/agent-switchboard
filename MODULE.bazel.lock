@@ -316,7 +316,7 @@
     "@@rules_nixpkgs_core+//extensions:package.bzl%nix_pkg": {
       "general": {
         "bzlTransitiveDigest": "2alEQC7q9PgrArc8ZeI662VmDHLGfuswqnzBJvVDnmg=",
-        "usagesDigest": "Qc7DKieBnYMIPF510+wz84gz89gJfFVTQrUWYgK/7Do=",
+        "usagesDigest": "ah7ypD6J3D5Zj5nxefCqtKfCtYuc52JWdl8VOgBoRho=",
         "recordedInputs": [
           "REPO_MAPPING:,swb_nixpkgs rules_nixpkgs_core++nix_repo+swb_nixpkgs",
           "REPO_MAPPING:rules_nixpkgs_core+,bazel_skylib bazel_skylib+"
@@ -355,7 +355,7 @@
     "@@rules_nixpkgs_core+//extensions:repository.bzl%nix_repo": {
       "general": {
         "bzlTransitiveDigest": "dTTtWNdwe7E4j77oKh1mHI1qtdxfaVSGSZa1oPf2QjU=",
-        "usagesDigest": "Vr7FLD+x+Jv/Ps/vAnpx4WOipc46mu9GM93GiIO4lJ4=",
+        "usagesDigest": "PpGtyqxLuRv9Cyg9mBnB38Lw99Rit4e9VHhGcsCb1m4=",
         "recordedInputs": [
           "REPO_MAPPING:rules_nixpkgs_core+,bazel_skylib bazel_skylib+"
         ],
