@@ -1,18 +1,18 @@
 {
   "file_sha256": {
     ".bazelversion": "1b9487d55bea47fea50d226cc9c53bc548877ad2a318bac8fbc8b320f429e5c5",
-    "BUILD.bazel": "208faf29666f08fd4b43cda1d858ba8920d5fb1eede941acd1d0f680b69a2d01",
-    "Cargo.lock": "48feda0978d1982d72090cb2b1f201a17d5e73814c60f401bf2f318413752d66",
-    "Cargo.toml": "396952aa0065d3c7901942dcc6d1b9122235f86030e4480dad3f5b0a07e610e8",
-    "MODULE.bazel": "35135ac0bca7d6d1a66d17fa62e3bc021b3d0eb9014712b864121892974765fe",
-    "MODULE.bazel.lock": "f8f3d1035bb7a86e0823319b7c550a79320ec9c50da7127342069697210ba694",
-    "cargo-bazel-lock.json": "a2c491898792d731cbf2947019c54171fc2a1c42fed1fd5c5986e7f87b29db40",
+    "BUILD.bazel": "02051c3539cc0cba44203172c035d68e59a3e77ff279e4c227dfb8e9b8114780",
+    "Cargo.lock": "cf22f6fde95f57df7c8fcaf2296c7234dd555fa74e6fd466a1c9c7ed8dfa95bd",
+    "Cargo.toml": "b0a887a07c7b33d22ac7c87c6a80198657c4e14cf60224c2d061c005f29bf7ec",
+    "MODULE.bazel": "d68ede0f08ea630b15af927cc2c73e99824872114397e62faab414f252188df6",
+    "MODULE.bazel.lock": "d16b75d7ebf7e326b0055c52aff8f8abebad4637ae58f38ce07513e6b3d6bf0e",
+    "cargo-bazel-lock.json": "6c580f8738e8d1c99f48d1e0315bafaccb589798a54970e126f209289bea0282",
     "crates/swb-agentd/BUILD.bazel": "4c53792c73662c8cf3737e36559acc042f53a28c4c5d638586e177df1f56adb7",
     "crates/swb-agentd/Cargo.toml": "bd1e24061d70fa7e774eadcb87a83e81ff002e38c626603ba5d9e0462cfb0220",
     "crates/swb-agentd/src/lib.rs": "03c8ff21db3b6556a4de5436ecf22589bf4ed43303cd6504b743394ad218bef7",
     "crates/swb-broker/BUILD.bazel": "7bfc5fe7429424f4b9a9fd1c4a090854e78cdbf41a633d97bd61dddb3425accc",
     "crates/swb-broker/Cargo.toml": "630fefce1b21b5b104f42c7a40bd36c6b965b8563be40ef37c75be69fca3531d",
-    "crates/swb-broker/src/lib.rs": "a584c6e62689188c698e7f194dff6efe0bb28feda8bc92ea8f7c271e038e8bae",
+    "crates/swb-broker/src/lib.rs": "31f4f7ec3b0acb1bb3ab4c5282dd06a1129ed5d259d8f5ae224cc3c1c67cf549",
     "crates/swb-broker/tests/stamp.rs": "f07fa0a5d40fbb81aa4062354d87f3baf216aa03f66b15520ce0bb6897b117f3",
     "crates/swb-proto/BUILD.bazel": "f886fc6c14a076e6f5996fb862f857e487454afcfe6271037988e52e03b35f1c",
     "crates/swb-proto/Cargo.toml": "af016b200f0a54f49e374ad058825af9b79490b001af20e6136ab27d4f3fd4c3",
@@ -23,13 +23,18 @@
     "crates/swb/BUILD.bazel": "6eba47ac963e621f40a16d1327996021574cda3bddb592d1f38150c6af408215",
     "crates/swb/Cargo.toml": "601bbc80f9ec9f76ee0be84a6ea6e8b264a291a1563b37910cd0f7c5fdf46cb1",
     "crates/swb/src/channel.rs": "311e3e792cea8a8e28074f3ca765355ea5c94311d140e5f17c69e9bbe02dad16",
-    "crates/swb/src/main.rs": "2df1b56657e699fbef871e59ed7265b1380ea5bd19082a964d80d62eed0c39c1",
-    "deploy/BUILD.bazel": "3cd551dea3f25ba65dc536d1b0c0da05b4b40614f955fec7d26ef818abf9f9ae",
+    "crates/swb/src/main.rs": "fa18eb5af85e7b472a2b7938a24588b662fc4926118b531585c6a6437f22f420",
+    "deploy/BUILD.bazel": "414e9a927e0dfb89f8236367db755014ce8b56b815621ee1d0f9da99a1265ac0",
     "platforms/BUILD.bazel": "6d5c7d3dada37113084e621e8065a05e4e58e0c7dd7d206dfd7f0cb3f4507d25",
     "tools/BUILD.bazel": "d7ae7983138ad3c50004efd36fb29cac5583647b5dc3f46189f594f2470bd31c",
+    "tools/cc/BUILD.bazel": "b4fdf94422a4c57858f0d456b6ae4460755ef2ab061768861086440f18b45436",
+    "tools/cc/nixpkgs.nix": "910583bcfa3664bdc3abef72d1bbc248d51f25ceb9e394bbe775b077b8789206",
+    "tools/cc/nixpkgs_pin_test.sh": "2b6d116888fa88ce9c4ed101ceddfbeb6f933b3940dde9f34083458458790fbc",
+    "tools/cc/zig_cc.BUILD": "93048670eac2e0e9a226627a762dc28ef86ee5cd223756398aa42d17fc30501f",
+    "tools/cc/zig_cc.nix": "f536da29f96dfce255ab24bb75999fbcf93d2196561c9aca5affa4ca7e7ab26d",
     "tools/clippy_test.sh": "1a0c16f7e334bdfae84d8f25dab84cc2dfb45a8adcd95189e0d9662d10559261"
   },
-  "image": "ghcr.io/xoxd-ai/agent-switchboard@sha256:66e439667c25791002e6af86d3bf088c5cbe5b35021874437fd9e1b202284555",
+  "image": "ghcr.io/xoxd-ai/agent-switchboard@sha256:2d53153f4321fbfb06704b94f4820af0d6be28b473684de3cfcae152e7a1b453",
   "live_acceptance": false,
   "manifest_size": 4579,
   "platform": {
@@ -44,17 +49,19 @@
     "user": "65532"
   },
   "pr_heads": {
-    "23": "efceed56f2b191cfee919788309360f6fe18a9aa"
+    "26": "51e0346432dc9083ad675333ff58fa990680582f"
   },
-  "publication_receipt": "PENDING: v0.2.0 release workflow registry readback; ratified R-C411, TIN-5770 comment cdeb84f6-d8a4-4d17-a3ca-72aee9b02014",
+  "publication_receipt": "PENDING: v0.2.1 release workflow registry readback; ratified R-C451 (TIN-5770 comment 0fc1217c-7f00-4dec-a276-d2c12164f94e) under R-C435 (TIN-5770 comment d3d90700)",
   "qualification": "published-candidate-only",
   "rulings": [
-    "SWB-R57",
-    "R-C411",
+    "SWB-R58",
+    "R-C416",
+    "R-C435",
+    "R-C451",
     "R-N13"
   ],
   "schema": "swb.approved-release.v1",
-  "source": "26f38b9ac4652866ea30d6553bac2374f7494e4d",
+  "source": "9bc96349129a7e595dd7d3795da0ce0480f44f22",
   "source_inputs": [
     ".bazelversion",
     "BUILD.bazel",
@@ -68,5 +75,5 @@
     "platforms/",
     "tools/"
   ],
-  "upstream_main": "4854872f0852482170b532b063d03166967681ac"
+  "upstream_main": "363ebcde6777e5a6f67816a4e8b132d4f5c91d2b"
 }

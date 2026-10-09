@@ -549,6 +549,17 @@ Mimir series, the lookup recipes, the outbox and the L0–L5 phases — is
   `MODULE.bazel`). That changes the image, so `sha256:66e43966…` is not
   published, and the new digest needs its own ratification before
   publication.
+- **SWB-R58 hermetic release, v0.2.1 (2026-10-08):** R-C451 bumps the
+  workspace to 0.2.1 (#26) so the release reports the version its tag
+  names, and R-C435 pre-authorizes the digest that two clean Sting builds
+  of that merge reproduce. The approved source is
+  `9bc96349129a7e595dd7d3795da0ce0480f44f22` (the #26 merge, on top of the R-C416
+  `tools/cc` toolchain from #25) at
+  `sha256:2d53153f4321fbfb06704b94f4820af0d6be28b473684de3cfcae152e7a1b453`,
+  published through the release workflow under the signed `v0.2.1` tag.
+  Like SWB-R57, the source is a GitHub merge commit signed by
+  `B5690EEEBB952194`. SWB-R57 and its `sha256:66e43966…` stay unpublished;
+  this record authorizes no other image.
 - **SWB-R54 state custody (2026-09-27):** TIN-5105 is blahaj-operator-owned
   dedicated OpenTofu state commissioning. Backend, separate identity/carrier,
   backup, lock contention/release and scratch restore receipts must precede
@@ -781,6 +792,7 @@ receipts (TIN-4655 comments `6274ecbd` and `fd195b08`) and their PRs.
 | SWB-R55 | 2026-10-04 | R-C304 (operator interview, TIN-4655 comment `dcb5b687`); R-C262, R-C268, R-C274 | Approve the clock-seam release: signed source d8ebfdbf (GitHub merge key B5690EEEBB952194) at digest `sha256:c9170c71…` (4579-byte manifest), from two matching clean Sting builds. Recorded in `approved-broker.json`; v0.1.0 publishes only this digest. SWB-R53 is never published. |
 | SWB-R56 | 2026-10-07 | R-C389 (operator interview, Linear TIN-5770 comment `d00ba5ef`) | "Adopt channels now": swb gains a Claude Code channel emitter and lab's managed claude wrapper passes the launch flags, with no spike gate. Channels are the Claude push path (v1c); agentd's socket notice is no longer the plan for Claude; SWB-R03 and SWB-R17 amended; SWB-R20 unchanged. |
 | SWB-R57 | 2026-10-07; amended 2026-10-08 | R-C411 (operator interview, Linear TIN-5770 comment `cdeb84f6`): "Ratify, release workflow (Recommended)". Amendment: R-C416 (TIN-5770 comment `9b9667d2`): "Hermetic toolchain" | Approve the v0.2.0 channel release: signed source 26f38b9a (GitHub merge key B5690EEEBB952194) at digest `sha256:66e43966…` (4579-byte manifest), from two matching clean Sting builds plus a release-workflow-equivalent rebuild. Recorded in `approved-broker.json`; the signed v0.2.0 tag publishes only this digest, through `release.yml`. *Amended 2026-10-08 (R-C416):* the release build uses the pinned Nix C toolchain (`tools/cc`), not the host gcc. The digest changes, so `sha256:66e43966…` is not published; the new digest needs its own ratification before publication. |
+| SWB-R58 | 2026-10-08 | R-C451 (operator interview, Linear TIN-5770 comment `0fc1217c`): "Bump crates to 0.2.1 first (Recommended)"; R-C435 (TIN-5770 comment `d3d90700`): "Pre-authorize if reproducible (Recommended)"; R-C416 (comment `9b9667d2`) | Approve the v0.2.1 hermetic-toolchain release: signed source 9bc96349 (the #26 version-bump merge; GitHub merge key B5690EEEBB952194) at digest `sha256:2d53153f…` (4579-byte manifest), from two matching clean Sting builds of that merge, one with every host C compiler and binutils hidden. Recorded in `approved-broker.json`; the signed v0.2.1 tag publishes only this digest, through `release.yml`. |
 
 Estate rulings this design depends on:
 
