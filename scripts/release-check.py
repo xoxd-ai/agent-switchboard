@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only source/OCI evidence check for the approved broker (SWB-R57).
+"""Read-only source/OCI evidence check for the approved broker (SWB-R58).
 
 No network, build, publication, activation or process-control action is taken.
 Supplied registry bytes are evidence from the caller, not a fresh pull proof.
@@ -174,7 +174,7 @@ def main():
     if (args.main_ref or args.tag_signer) and not args.tag:
         parser.error("--main-ref and --tag-signer require --tag")
     repo = Path(__file__).resolve().parents[1]
-    report = {"rulings": ["SWB-R57", "SWB-R49", "R-N13"], "live_acceptance": False, "fresh_registry_pull": False, "publication_authorized": False}
+    report = {"rulings": ["SWB-R58", "SWB-R49", "R-N13"], "live_acceptance": False, "fresh_registry_pull": False, "publication_authorized": False}
     try:
         release = json.loads((repo / "docs/releases/approved-broker.json").read_text())
         report.update(check_source(repo, release), image=release["image"])

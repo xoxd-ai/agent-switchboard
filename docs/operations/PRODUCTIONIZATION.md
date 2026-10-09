@@ -1,19 +1,20 @@
 # Switchboard source and productionization lane
 
-Authority: SWB-R49–SWB-R57, LAB-TAKEOVER-20260930 and R-N13.
+Authority: SWB-R49–SWB-R58, LAB-TAKEOVER-20260930 and R-N13.
 Source/image ownership is here; lab delivers harness/Home Manager integration;
 blahaj owns custody, retained storage, routing and cluster rollout (SWB-R51).
 
-The approved release is SWB-R57, v0.2.0 (R-C411): signed source
-`26f38b9ac4652866ea30d6553bac2374f7494e4d` at
-`ghcr.io/xoxd-ai/agent-switchboard@sha256:66e439667c25791002e6af86d3bf088c5cbe5b35021874437fd9e1b202284555`.
-The previous release, SWB-R55 v0.1.0 (`d8ebfdbf` at `sha256:c9170c71…`),
-stays published; its record is in git history.
+The approved release is SWB-R58, v0.2.1 (R-C451 under R-C435): signed source
+`9bc96349129a7e595dd7d3795da0ce0480f44f22` at
+`ghcr.io/xoxd-ai/agent-switchboard@sha256:2d53153f4321fbfb06704b94f4820af0d6be28b473684de3cfcae152e7a1b453`.
+The previous published release, SWB-R55 v0.1.0 (`d8ebfdbf` at
+`sha256:c9170c71…`), stays published; SWB-R57 v0.2.0 (`sha256:66e43966…`)
+was never published. Their records are in git history.
 Its protected-input hashes and PR heads are in
 [`approved-broker.json`](../releases/approved-broker.json), whose
 `qualification` is `published-candidate-only` and `live_acceptance` false.
 SWB-R53 (`b5158729`, `b0633ecb`) is never published. Later main commits that
-leave the 27 protected inputs unchanged need no new approval.
+leave the 33 protected inputs unchanged need no new approval.
 
 ## Source integration and upstream landing
 
@@ -131,6 +132,17 @@ recorded below.
   `nix-build` on PATH and no host gcc. The image digest changes, so
   `sha256:66e43966…` is not published; the new digest needs its own ruling
   and record before any tag can publish it.
+- **SWB-R58 recorded (R-C451, R-C435).** The operator chose "Bump crates to
+  0.2.1 first (Recommended)" (TIN-5770 comment `0fc1217c`), so #26 bumps the
+  workspace and module to 0.2.1 before any build. Two clean Sting builds of
+  its merge `9bc96349` (fresh clones, fresh output roots, no disk or remote
+  cache, `--embed_label=9bc96349…`), one inside a namespace where every host
+  C compiler, assembler, linker and binutils is a logging stub, both gave
+  `sha256:2d53153f…` (4579-byte manifest). R-C435
+  ("Pre-authorize if reproducible (Recommended)", comment `d3d90700`) makes
+  that reproduced digest the approved one. The protected-input map adds the
+  five `tools/cc/*` files. The `v0.2.1` tag sits on the merge of this
+  record, as for v0.2.0.
 
 ## Secrets scan, CODEOWNERS and tag-triggered release
 
@@ -152,7 +164,7 @@ recorded below.
   2. `release-check --tag TAG --tag-signer <operator key> --main-ref
      origin/main`: the tag is annotated, signed by the operator release key
      (GitHub's key never satisfies this), points at the checked-out commit and
-     that commit is on main; the signed source and all 27 protected inputs
+     that commit is on main; the signed source and all 33 protected inputs
      match. The approved `source` is then read once from
      `approved-broker.json` and checked to be an ancestor of HEAD;
   3. build `//deploy:image.digest` and `release-check --built-digest`: refuse
@@ -174,10 +186,9 @@ recorded below.
 - `just release-check-tag TAG [MAIN_REF]` runs the step 2 gate locally.
 - The workflow writes evidence only. `publication_authorized` and
   `live_acceptance` stay false; it never edits `approved-broker.json`. Today
-  the record still names the SWB-R57 digest `sha256:66e43966…`, which the
-  R-C416 toolchain no longer builds, so every tag fails closed at
-  `--built-digest` until a new digest is ratified and recorded. Publishing
-  any image needs a ruling and an approved release entry first.
+  the only image it can push is the SWB-R58 digest `sha256:2d53153f…`,
+  and only if the tagged tree's Bazel build reproduces it. Publishing any
+  other image needs a ruling and an approved release entry first.
 - The `v0.1.0` tag run of this workflow failed: at the time it required a
   runner-supplied `TINYLAND_CI_BAZELISK_BIN` that GloriousFlywheel runners
   did not provide. v0.1.0 was therefore published by hand under R-C312: two

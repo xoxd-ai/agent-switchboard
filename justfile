@@ -54,7 +54,7 @@ local-integrate-named name refs:
 local-integrate-named-dry-run name refs:
     bash ./scripts/local-integrate.sh --dry-run --name {{ quote(name) }} {{ quote(refs) }}
 
-# SWB-R57 / R-N13: read-only approved-source and supplied OCI evidence checks.
+# SWB-R58 / R-N13: read-only approved-source and supplied OCI evidence checks.
 # No build, publication, registry credentials or deployment admission.
 [positional-arguments]
 release-check *args:
@@ -63,7 +63,7 @@ release-check *args:
 release-check-test:
     python3 -m unittest discover -s scripts -p test_release_check.py
 
-# TIN-4655 (SWB-R57): verify a signed annotated release tag at HEAD that is on
+# TIN-4655 (SWB-R58): verify a signed annotated release tag at HEAD that is on
 # upstream main, plus the approved source inputs. Read-only; the release
 # workflow runs the same gate before it builds or pushes anything.
 release-check-tag tag main_ref="upstream/main":
