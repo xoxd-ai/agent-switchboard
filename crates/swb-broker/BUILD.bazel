@@ -5,7 +5,7 @@ package(default_visibility = ["//visibility:public"])
 
 rust_library(
     name = "swb_broker",
-    srcs = ["src/lib.rs"],
+    srcs = ["src/lib.rs", "src/service_roundtrip_tests.rs"],
     aliases = aliases(),
     edition = crate_edition(),
     proc_macro_deps = all_crate_deps(proc_macro = True),

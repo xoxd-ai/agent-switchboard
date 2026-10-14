@@ -1,0 +1,117 @@
+{
+  "schema": "swb.functional-rollout.v1",
+  "rulings": [
+    "LAB-TAKEOVER-20260930",
+    "SWB-R49",
+    "SWB-R54",
+    "R-N13"
+  ],
+  "qualification": "pending-live-evidence",
+  "activation_permitted": false,
+  "sources": {
+    "broker_sha": "b5158729355e836a3a98ade90d7649690e7a6900",
+    "lab_candidate_sha": "9b17b5f6702abf774892a6569caa95057be52133"
+  },
+  "issued_broker_origin": null,
+  "deployed_image_digest": null,
+  "custody_ticket": "TIN-5105",
+  "gates": [
+    {
+      "id": "custody",
+      "owner": "blahaj operator",
+      "status": "pending",
+      "observed_at": null,
+      "evidence_refs": [],
+      "required_evidence": [
+        "exact state/lock scoped credential",
+        "versioning retention off-node backup",
+        "lock contention clean unlock isolated restore"
+      ]
+    },
+    {
+      "id": "registry_host_consistency",
+      "owner": "lab delivery",
+      "status": "pending",
+      "observed_at": null,
+      "evidence_refs": [],
+      "required_evidence": [
+        "issued broker origin matches rendered active registry",
+        "delivered package/source marker",
+        "exact active native host profile; disabled precommissioning remains inert"
+      ]
+    },
+    {
+      "id": "native_identity",
+      "owner": "operator attended harnesses",
+      "status": "pending",
+      "observed_at": null,
+      "evidence_refs": [],
+      "required_evidence": [
+        "Neo Claude session identity/start token",
+        "Sting Codex caller-supplied PID/session/start binding without ancestry",
+        "Sting Pi native process/session/start identity",
+        "fixture identities do not qualify"
+      ]
+    },
+    {
+      "id": "neo_claude_sting_codex_reply",
+      "owner": "operator attended harnesses",
+      "status": "pending",
+      "observed_at": null,
+      "evidence_refs": [],
+      "required_evidence": [
+        "real sender and recipient identities",
+        "fresh message ID/thread ID and reply in_reply_to",
+        "peer authority only",
+        "inbox receipt and recipient ack",
+        "message body omitted from public receipt"
+      ]
+    },
+    {
+      "id": "pi_reply",
+      "owner": "operator attended harnesses",
+      "status": "pending",
+      "observed_at": null,
+      "evidence_refs": [],
+      "required_evidence": [
+        "real Pi sender/recipient",
+        "same thread monotonic sequence and reply link",
+        "native child registration rather than parent inheritance",
+        "inbox and ack readbacks"
+      ]
+    },
+    {
+      "id": "pod_restart_persistence",
+      "owner": "blahaj operator named lifecycle gate",
+      "status": "pending",
+      "observed_at": null,
+      "evidence_refs": [],
+      "required_evidence": [
+        "operator ruling and exact named workload",
+        "unacked message identity/seq before restart",
+        "same PVC/backend identity after operator restart",
+        "message retained; ack state and next sequence persist",
+        "no agent lifecycle command"
+      ]
+    },
+    {
+      "id": "broker_down_nonblocking",
+      "owner": "operator owned endpoint fixture",
+      "status": "pending",
+      "observed_at": null,
+      "evidence_refs": [],
+      "required_evidence": [
+        "operator chosen unavailable endpoint or ownedfixture; no production disruption inferred",
+        "actual hook returns within2s and exits0",
+        "ordinary workflow continues",
+        "degraded/fallback notice; no invented delivery success",
+        "restored live endpoint separately verified"
+      ]
+    }
+  ],
+  "post_v1_telemetry": {
+    "status": "deferred-owner-proof",
+    "ticket": "TIN-5022",
+    "does_not_replace_functional_gates": true
+  }
+}
