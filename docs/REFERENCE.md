@@ -1,9 +1,11 @@
 # swb reference
 
-Settings, routes, tools and verbs for `swb` v0.4.0 (SWB-R64). v0.4.0 keeps
-the v0.3.0 routes and adds the harness kinds `hermes` and `kimicode`, which
-a v0.3.0 broker or client refuses (see [Harness kinds](#harness-kinds) and
-the [CHANGELOG](../CHANGELOG.md) upgrade notes). v0.3.0 broke the v0.2 wire
+Settings, routes, tools and verbs for `swb` v0.5.0 (SWB-R71). v0.5.0 keeps
+the v0.4.0 routes and adds opt-in sender binding and a per-sender send rate
+limit (see [Sender binding](#sender-binding-v050) and the
+[CHANGELOG](../CHANGELOG.md) upgrade notes). v0.4.0 added the harness kinds
+`hermes` and `kimicode`, which a v0.3.0 broker or client refuses (see
+[Harness kinds](#harness-kinds)). v0.3.0 broke the v0.2 wire
 format; what changed from v0.2.2 and the upgrade order are in
 [releases/v0.3.0-migration.md](releases/v0.3.0-migration.md). The design and
 its rulings are in [ADR-0001](adr/0001-agent-switchboard.md); a walkthrough
@@ -24,7 +26,7 @@ Identity is self-asserted: the end token stops a caller ending a session it
 did not register, but anyone who can register can re-register any agent id
 (see [SECURITY.md](../SECURITY.md)).
 
-### Sender binding (unreleased, v0.5.0)
+### Sender binding (v0.5.0)
 
 A session can opt in to sender binding
 ([ADR-0003](adr/0003-sender-binding.md), SWB-R66). `register` with
@@ -123,7 +125,7 @@ while the row's binding is live (v0.5.0, SWB-R68). `GET /v1/peers?me=` and
 `GET /v1/inbox` answer 405.
 
 `session_token` is required only for a bound id (see
-[Sender binding](#sender-binding-unreleased-v050)).
+[Sender binding](#sender-binding-v050)).
 
 Errors are `{"error", "code"}` with a status per kind: 400
 (`invalid_argument`, `invalid_json`), 401 (`unauthorized`, v0.5.0), 404

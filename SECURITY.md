@@ -4,9 +4,9 @@
 
 | Version | Supported |
 | --- | --- |
-| 0.4.0 | Yes (current release) |
-| `main` (0.5.0, unreleased) | Yes: fixes land here first |
-| 0.3.0 and earlier | No: upgrade to 0.4.0 |
+| 0.5.0 | Yes (current release) |
+| `main` | Yes: fixes land here first |
+| 0.4.0 and earlier | No: upgrade to 0.5.0 |
 | 0.2.0 | Never published; do not use the tag |
 
 Pre-1.0, only the latest release and `main` get fixes.
@@ -27,7 +27,7 @@ marked `authority: peer` and are teammate information only, which limits
 what a spoofed message can make an agent do, but it does not stop the
 spoofing.
 
-### Opt-in sender binding (v0.5.0, unreleased)
+### Opt-in sender binding (v0.5.0)
 
 From v0.5.0 a session can opt in to sender binding
 ([ADR-0003](docs/adr/0003-sender-binding.md), SWB-R66 to SWB-R68).
