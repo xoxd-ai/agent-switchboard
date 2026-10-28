@@ -7,6 +7,10 @@
 //! store's tables. Time comes from the store's injected clock, in whole
 //! seconds, so tests drive it with a manual clock.
 //!
+//! v0.5.1 (TIN-7577): the limiter counts refusals by the sender's harness
+//! kind, never by agent id, and `/metrics` reports them with the limit
+//! settings and the number of buckets held.
+//!
 //! The bucket is a guard against a looping or flooding client that keeps
 //! one agent id. An unbound id is self-asserted, so a client that changes
 //! its `from` on every send gets a fresh bucket each time; the tailnet ACL,
@@ -51,6 +55,9 @@ struct Bucket {
 pub(crate) struct Limiter {
     pub(crate) limit: SendLimit,
     buckets: HashMap<String, Bucket>,
+    /// Refused sends since broker start, by the sender's harness kind in
+    /// [`crate::HARNESS_KINDS`] order, never by agent id (TIN-7577).
+    pub(crate) refused: [u64; crate::HARNESS_KINDS.len()],
 }
 
 fn refilled(limit: SendLimit, bucket: Bucket, now: i64) -> f64 {
@@ -62,6 +69,11 @@ fn refilled(limit: SendLimit, bucket: Bucket, now: i64) -> f64 {
 impl Limiter {
     fn refilled(&self, bucket: Bucket, now: i64) -> f64 {
         refilled(self.limit, bucket, now)
+    }
+
+    /// How many buckets the limiter holds now, at most [`MAX_BUCKETS`].
+    pub(crate) fn buckets_held(&self) -> usize {
+        self.buckets.len()
     }
 
     /// Make room for one new bucket when the map is at [`MAX_BUCKETS`].

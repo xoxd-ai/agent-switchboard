@@ -111,7 +111,7 @@
     "body": {
       "type": "string",
       "maxLength": 16384,
-      "description": "At most 16 KiB. The broker enforces the byte limit (maxLength counts characters) and strips control characters."
+      "description": "At most 16 KiB. The broker enforces the byte limit (maxLength counts characters) after it removes carriage returns and every control character except newline and tab."
     }
   },
   "allOf": [

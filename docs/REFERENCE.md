@@ -102,10 +102,10 @@ a POST with a JSON body (`Content-Type: application/json`).
 | --- | --- | --- |
 | `POST /v1/register` | `{harness, host, pid, session_id, proc_start, bind?, session_token?}` | returns `{agent_id, lease_seconds, end_token, bound}`, plus `session_token` when bound |
 | `POST /v1/end` | `{me, end_token, session_token?}` | any other end token answers `{"state":"unknown"}` and ends nothing |
-| `POST /v1/peers` | `{me?, all?, host?, limit?, cursor?, proc_start?}` | `me` renews that session's lease |
+| `POST /v1/peers` | `{me?, all?, host?, limit?, cursor?, proc_start?}` | `me` renews that session's lease; `proc_start` keeps only registrations that used it, then one row per session among them (v0.5.1) |
 | `GET /v1/peers` | `?all=&host=&limit=&cursor=` | passive listing; changes nothing |
-| `POST /v1/send` | `{from, to, ticket, body, …, session_token?}` (envelope v3) | `ticket` is `TIN-<digits>` or `none`; a body is at most 16 KiB; an empty sender bucket answers 429; an invalid send or an idempotent retry spends no bucket token |
-| `POST /v1/inbox` | `{me, limit, wait_seconds, session_token?}` | long-poll |
+| `POST /v1/send` | `{from, to, ticket, body, …, session_token?}` (envelope v3) | `ticket` is `TIN-<digits>` or `none`; a body is at most 16 KiB and keeps newline and tab, while CR and other control characters are removed (v0.5.1); an empty sender bucket answers 429; an invalid send or an idempotent retry spends no bucket token; the result adds `recipient_state` (v0.5.1); a 429 carries `retry_after` and a `Retry-After` header when the bucket refills (v0.5.1) |
+| `POST /v1/inbox` | `{me, limit, wait_seconds, after?, session_token?}` | long-poll; oldest first in arrival order; a full page carries `next_after` (v0.5.1) |
 | `POST /v1/ack` | `{me, msg_id, session_token?}` | |
 | `POST /v1/heartbeat` | `{me}` | renews the lease only |
 | `POST /v1/thread` | `{me, thread_id, after_seq?, limit?}` | one thread's messages that `me` sent or received, in seq order; pages of `limit` (default 20, at most 100) with `next_after_seq`; changes no delivery state |
@@ -122,6 +122,32 @@ at most 200) with a `next_cursor`. A row is
 while the row's binding is live (v0.5.0, SWB-R68). `GET /v1/peers?me=` and
 `GET /v1/inbox` answer 405.
 
+From v0.5.1 (TIN-7577) an `inbox` answer is
+`{messages, next_after}`. Messages come oldest first in arrival order.
+`next_after` is the last `msg_id` of a full page and `null` otherwise.
+Pass it as `after` to read the messages that arrived after it, so a
+reader that holds a full page of unacknowledged mail can still reach the
+next message. `after` must name a message of the caller's mailbox, in
+any state. Any other id answers 400 `invalid_argument` with
+`unknown after`, and so does a pruned one. A long-poll with `after` waits
+for mail past it.
+
+A `send` result adds `recipient_state` from v0.5.1. It is `live`, `idle`,
+`gone`, `ended` or `unregistered`, and says whether anyone reads the
+recipient's mail now. A live binding of the recipient's harness, host
+and session id counts for every pid of it. The send succeeds in every
+state, and the message waits in its mailbox until it expires. The stored
+and delivered envelope never carry the field, and envelope v3 does not
+list it: a submitted envelope with it answers `unknown envelope field`.
+An idempotent retry answers for the stored recipient, whatever `to` it
+names.
+
+A send the rate limit refuses answers 429 `rate_limited`. From v0.5.1 the
+body adds `retry_after`, the seconds until the sender's bucket refills,
+and the REST answer carries the same value in a `Retry-After` header. A
+bucket that never refills gives neither. The MCP error text carries the
+same body.
+
 `session_token` is required only for a bound id (see
 [Sender binding](#sender-binding-unreleased-v050)).
 
@@ -135,18 +161,35 @@ guard's refusals are 403. The full table is in the migration notes.
 
 `/metrics` is on `SWB_METRICS_LISTEN`. It includes `swb_claims_active`,
 `swb_claim_overlaps` (active claims sharing a subject with another holder)
-and `swb_handoffs_total`.
+and `swb_handoffs_total`. From v0.5.1 (TIN-7577) it adds the send limit
+series. None carries an agent id.
+
+| Series | Type | Meaning |
+| --- | --- | --- |
+| `swb_send_rate_limited_total{harness}` | counter | sends refused with 429 since broker start, one series per harness kind, zeros included |
+| `swb_send_limit_burst` | gauge | `SWB_SEND_BURST` |
+| `swb_send_limit_refill_per_minute` | gauge | `SWB_SEND_REFILL_PER_MINUTE` |
+| `swb_send_buckets` | gauge | sender buckets the broker holds, at most 4096 |
 
 The broker writes one JSON audit line to stdout for each successful
 `register`, new `send` and `ack`, for each message an `inbox` read returns
 (op `fetch`, with `delivery_count`), and for each recorded, renewed or
 refused claim, release and handoff. Fields are named explicitly: `ts`, `op`,
 `me`, `to`, `ticket`, `ruling`, `msg_id`, `thread_id`, `seq`,
-`in_reply_to`, `size`, `body_hmac` and the claim fields. A line never
-carries a body, a note, an end token or a session token. The message lines share `msg_id`,
+`in_reply_to`, `size`, `body_hmac`, `recipient_state` and the claim
+fields. From v0.5.1 only a `send` line carries `recipient_state`, and the
+other lines keep their v0.5.0 keys. A line never carries a body, a note, an end
+token or a session token. The message lines share `msg_id`,
 `thread_id` and `ticket`, so a log reader can follow one thread from send
 through delivery to ack (ADR-0002 L1-lite). The broker has no log client;
 the lines go to stdout only.
+
+A send refused by the rate limit writes one line of its own (v0.5.1,
+TIN-7577):
+`{"ts", "op": "send_refused", "code": "rate_limited", "harness", "retry_after", "route"}`.
+`harness` is the sender's harness kind, `retry_after` the seconds until
+its bucket refills or null, and `route` is `rest` or `mcp`. The line
+carries no agent id and no body.
 
 ## Claims
 
@@ -215,9 +258,9 @@ tokens and strip them before the model sees them.
 ## CLI verbs
 
 `serve`, `hook <harness> <event>`, `whoami [--register]` (plain `whoami`
-makes no broker call), `inbox`,
+makes no broker call), `inbox [--after ULID]`,
 `send <to> <ticket> [--ruling ID] [--operator-directed] [--in-reply-to ULID]
-[--thread ULID] [--msg-id ULID] < body`, `ack <msg_id>`,
+[--thread ULID] [--msg-id ULID] [--no-ack] < body`, `ack <msg_id>`,
 `peers [--all] [--host H] [--limit N] [--cursor ID]`, `heartbeat`,
 `thread <thread_id> [--after SEQ] [--limit N]`,
 `claim <subject> [--exclusive] [--lease-hours N] [--note TEXT]`,
@@ -231,6 +274,11 @@ makes no broker call), `inbox`,
   0; `--version`, `-V` and `version` exit 0. An unknown verb exits 2.
 - `peers` never passes `me`, so it refreshes no lease; nor does `claims`
   without `--mine`.
+- `send` reads the body from stdin and drops one trailing LF or CRLF, so
+  `printf '%s\n' "…" | swb send` stores the text without it. Other line
+  breaks and tabs reach the recipient (v0.5.1). `inbox` and `thread`
+  print one JSON line, so a body's line breaks appear as `\n` escapes and
+  never start a new output line.
 - Hooks save the end token on every successful register, under
   `$SWB_STATE_DIR/sessions/`; SessionEnd spends it and deletes the file.
   The CLI never prints the token: `whoami --register` prints
@@ -241,6 +289,17 @@ makes no broker call), `inbox`,
   prints `session_token_file`. `send`, `ack`, `inbox`, `claim`, `release`,
   `handoff` and SessionEnd send the saved token for `SWB_AGENT_ID`, and
   retry once on 401 when the file changed meanwhile.
+- `send --in-reply-to` also acknowledges that message and reports it in
+  `acked`, as the channel `reply` tool does (v0.5.1). `--no-ack` leaves it
+  in the mailbox. The exit code stays 0 when the ack fails, because the
+  send is committed. A failed ack prints a stderr warning only when an ack
+  may still reach the message: no answer, 401, a 5xx or a session not
+  registered yet. A refusal, such as 404 for a follow-up to a message
+  that is not in the caller's mailbox, shows only in `acked`.
+- `send` prints a stderr warning when `recipient_state` is not `live`. The
+  warning names the recipient and the state, and the send still stands.
+- `inbox --after ULID` reads the message that arrived after that one. A
+  broker older than v0.5.1 ignores `after`, and the CLI says so on stderr.
 - `agentd` is planned for P2 and exits 3; it is not in the usage text.
 
 Exit codes: 0 ok, 2 usage, 3 missing setting, broker error or a failed
@@ -265,6 +324,33 @@ shows a confirmation at startup. Events arrive as
 Answer with the `reply` tool or acknowledge with `ack`; the channel never
 acknowledges on its own.
 
+From v0.5.1 (TIN-7577):
+
+- **Paging.** The poller reads the head page of 8 as before. When that page
+  emits nothing new and is full, it reads the pages after it, at most 4 in
+  one poll, from where the last walk stopped. So a message behind 8 emitted,
+  unacknowledged ones still arrives. The walk starts at the head page's
+  `next_after` instead when a message waits to be pushed again, when the
+  stored position is on the head page, when the broker answers `unknown
+  after` for it, and when the first page after it repeats the head page.
+  Such a restart reads one page more in the same poll. Against an older
+  broker the head page carries no `next_after`, and the channel reads it
+  alone as before.
+- **Re-emit after a failed ack.** When an `ack`, a `reply`, or the ack
+  inside a `reply`, fails in a way that may pass later, the channel pushes
+  that message again on a later read, once, if the broker still lists it
+  as unacknowledged. Such a failure is no answer, a 401, a 5xx or a
+  session not registered yet. The poller then reads again without the
+  30-second recheck wait. A refusal such as 400, 403, 404, 409 or 429 fails
+  the same way again, so it never re-emits. A `reply` with `ack: false`
+  does not either, and nor does a full-mode session that does not push.
+- **Warnings.** `reply` returns `recipient_state` and, when the recipient
+  is not live, a `warning` field. The full-mode `send` does the same.
+- **Inbox tool.** `inbox` takes an optional `after` and returns
+  `next_after`. A broker older than v0.5.1 ignores `after`, so the tool
+  answers `broker does not page (v0.5.0 or older)` rather than return its
+  head page as the next one.
+
 ### Full tool set
 
 `swb channel --tools full` serves `reply`, `ack` and `inbox` plus `send`,
@@ -278,6 +364,8 @@ resolved, by the same rules as above:
   `identity_override_denied` before any broker request;
 - `send` refuses `operator_directed` and `ruling` with
   `operator_directed_denied`;
+- `send` with `in_reply_to` also acknowledges that message unless `ack` is
+  false (v0.5.1);
 - `peers` and `claims` stay passive listings unless the caller passes its
   own `me` (which renews its lease) or `claims` passes `mine`.
 

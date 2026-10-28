@@ -107,6 +107,9 @@ impl ErrorKind {
 pub struct StoreError {
     pub kind: ErrorKind,
     pub message: String,
+    /// Seconds until a refused send may succeed, for
+    /// [`ErrorKind::RateLimited`] with a bucket that refills (TIN-7577).
+    pub retry_after: Option<u64>,
 }
 
 impl StoreError {
@@ -114,7 +117,13 @@ impl StoreError {
         Self {
             kind,
             message: message.into(),
+            retry_after: None,
         }
+    }
+    /// The same error with `retry_after` set.
+    pub fn with_retry_after(mut self, seconds: Option<u64>) -> Self {
+        self.retry_after = seconds;
+        self
     }
     pub fn code(&self) -> &'static str {
         self.kind.code()
@@ -208,6 +217,10 @@ pub struct Store(Mutex<Connection>, Arc<dyn Clock>, Mutex<ratelimit::Limiter>);
 pub struct SendOutcome {
     pub envelope: Value,
     pub created: bool,
+    /// Where mail to the recipient stands when the send commits: `live`,
+    /// `idle`, `gone`, `ended` or `unregistered` (A5, TIN-7577). A send
+    /// result carries it; the stored envelope never does.
+    pub recipient_state: &'static str,
 }
 
 /// A `peers` request (R-C944). The default lists live sessions only, one
@@ -224,8 +237,9 @@ pub struct PeersQuery<'a> {
     pub limit: Option<u32>,
     /// The `next_cursor` of the previous page.
     pub cursor: Option<&'a str>,
-    /// Only sessions whose latest registration used this `proc_start`. The
-    /// caller supplies it; listings still never return it.
+    /// Only registrations that used this `proc_start`, then one row per
+    /// harness, host and session id among them (A4, TIN-7577). The caller
+    /// supplies it; listings still never return it.
     pub proc_start: Option<&'a str>,
 }
 
@@ -302,8 +316,31 @@ fn valid_rfc3339_shape(s: &str) -> bool {
             && suffix[4].is_ascii_digit()
             && suffix[5].is_ascii_digit())
 }
+/// A single-line field with every control character removed. v0.5.0 and
+/// older stored message bodies this way; a replay compares against it so a
+/// stored body keeps matching across the upgrade (TIN-7577).
 fn clean(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).collect()
+}
+/// A message body as the store keeps it (TIN-7577). Newline and tab stay,
+/// so a multi-line body keeps its lines. Every carriage return goes: CRLF
+/// becomes LF and a lone CR is dropped, so a CR cannot move a terminal's
+/// cursor back over a line it already printed. Every other control
+/// character goes too, as `clean` drops them.
+fn clean_body(s: &str) -> String {
+    s.chars()
+        .filter(|&c| matches!(c, '\n' | '\t') || !c.is_control())
+        .collect()
+}
+/// Whether a `--msg-id` retry carries the stored body, so it is a replay
+/// (TIN-7577). A row that kept its lines (`body_lines`, written by v0.5.1
+/// and later) matches the cleaned retry body exactly, so a retry that adds
+/// or moves a newline, tab or CR is a conflict. A row from v0.5.0 or older
+/// holds the body with every control character removed, so only such a row
+/// also matches the retry in that flattened form.
+fn same_body(old_body: &str, old_lines: bool, body: &str, raw_body: &str) -> bool {
+    old_body == body
+        || (!old_lines && !old_body.contains(['\n', '\t']) && old_body == clean(raw_body))
 }
 fn sql_err(e: rusqlite::Error) -> StoreError {
     StoreError::new(ErrorKind::Internal, e.to_string())
@@ -373,6 +410,52 @@ struct Binding {
 }
 /// A key's latest session row: agent id, nonce, bound, ended, last_seen.
 type BindingRow = (String, Option<Vec<u8>>, i64, i64, i64);
+/// The latest session row of `agent_id`'s delivery key (harness, host and
+/// session id), or `None` for a malformed id or a key with no row.
+fn latest_key_row(db: &Connection, agent_id: &str) -> StoreResult<Option<BindingRow>> {
+    let [harness, host, _, session] = match agent_id.splitn(4, ':').collect::<Vec<_>>()[..] {
+        [a, b, c, d] => [a, b, c, d],
+        _ => return Ok(None),
+    };
+    db.query_row(
+        "SELECT agent_id, token_nonce, bound, ended, last_seen FROM sessions
+         WHERE harness=?1 AND host=?2 AND session_id=?3
+         ORDER BY registered_seq DESC, agent_id DESC LIMIT 1",
+        params![harness, host, session],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+    )
+    .optional()
+    .map_err(sql_err)
+}
+/// Whether a key's latest row is a live binding: bound, not ended, with a
+/// token nonce, and seen within [`IDLE_MAX_AGE_SECONDS`]. The inbox gate and
+/// `recipient_state_of` share this one test, so a send never reports a
+/// binding the inbox does not honour (TIN-7577).
+fn is_live_binding(row: &BindingRow, now: i64) -> bool {
+    matches!(row, (_, Some(_), 1, 0, seen) if *seen >= now - IDLE_MAX_AGE_SECONDS)
+}
+/// Where mail to `recipient` stands (A5, TIN-7577). A live binding of its
+/// delivery key reads mail for every pid of that key, so the binding's own
+/// lease counts. Otherwise the recipient's own row decides, and an id with
+/// no row is `unregistered`. Read-only: it never marks a lapsed binding.
+fn recipient_state_of(db: &Connection, recipient: &str, now: i64) -> StoreResult<&'static str> {
+    if let Some(row) = latest_key_row(db, recipient)?
+        && is_live_binding(&row, now)
+    {
+        return Ok(lease_state(row.4, false, now));
+    }
+    let row: Option<(i64, i64)> = db
+        .query_row(
+            "SELECT last_seen, ended FROM sessions WHERE agent_id=?1",
+            [recipient],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(sql_err)?;
+    Ok(row.map_or("unregistered", |(seen, ended)| {
+        lease_state(seen, ended != 0, now)
+    }))
+}
 fn lease_state(seen: i64, ended: bool, now: i64) -> &'static str {
     if ended {
         "ended"
@@ -536,6 +619,86 @@ impl Store {
              CREATE INDEX IF NOT EXISTS messages_by_key ON messages(recipient_key, state, created_at);",
         )
         .map_err(sql_err)?;
+        // v0.5.1 (TIN-7577): each message's arrival position, from a
+        // store-wide counter that only grows. An inbox cursor compares it, so
+        // a later send always sorts after the cursor, whatever its msg_id or
+        // clock second. Rows without one (an older store, or rows a v0.5.0
+        // broker wrote after a downgrade) are filled in send order, after
+        // every position already handed out.
+        let has_arrival = db
+            .prepare("SELECT name FROM pragma_table_info('messages')")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_err(sql_err)?
+            .iter()
+            .any(|c| c == "arrival_seq");
+        if !has_arrival {
+            db.execute("ALTER TABLE messages ADD COLUMN arrival_seq INTEGER", [])
+                .map_err(sql_err)?;
+        }
+        // One transaction for the backfill and the counter, so a large store
+        // syncs once at startup, not once per row. A crash before the commit
+        // leaves every row unfilled, and the next start fills them again.
+        let fill = db.unchecked_transaction().map_err(sql_err)?;
+        let base: i64 = fill
+            .query_row(
+                "SELECT MAX(COALESCE((SELECT MAX(arrival_seq) FROM messages),0),
+                            COALESCE((SELECT value FROM counters WHERE name='arrival_seq'),0))",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(sql_err)?;
+        let unordered: Vec<String> = fill
+            .prepare(
+                "SELECT msg_id FROM messages WHERE arrival_seq IS NULL ORDER BY created_at, seq, rowid",
+            )
+            .and_then(|mut stmt| {
+                stmt.query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<Result<_, _>>()
+            })
+            .map_err(sql_err)?;
+        for (offset, msg_id) in (1i64..).zip(&unordered) {
+            fill.execute(
+                "UPDATE messages SET arrival_seq=?2 WHERE msg_id=?1",
+                params![msg_id, base + offset],
+            )
+            .map_err(sql_err)?;
+        }
+        fill.execute(
+            "INSERT INTO counters(name,value) VALUES('arrival_seq',?1)
+             ON CONFLICT(name) DO UPDATE SET value=MAX(value, excluded.value)",
+            [base + unordered.len() as i64],
+        )
+        .map_err(sql_err)?;
+        fill.commit().map_err(sql_err)?;
+        // v0.5.1 (TIN-7577): whether the stored body kept its newlines and
+        // tabs. A v0.5.1 send writes 1. Every older row reads 0: the column
+        // is added with that default, and a v0.5.0 broker running on this
+        // store after a downgrade names its columns and leaves it at 0. Only
+        // a row at 0 can match a retry in the flattened form.
+        let has_lines = db
+            .prepare("SELECT name FROM pragma_table_info('messages')")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_err(sql_err)?
+            .iter()
+            .any(|c| c == "body_lines");
+        if !has_lines {
+            db.execute(
+                "ALTER TABLE messages ADD COLUMN body_lines INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(sql_err)?;
+        }
+        db.execute_batch(
+            "CREATE INDEX IF NOT EXISTS messages_inbox_arrival ON messages(recipient, state, arrival_seq);
+             CREATE INDEX IF NOT EXISTS messages_key_arrival ON messages(recipient_key, state, arrival_seq);",
+        )
+        .map_err(sql_err)?;
         // P2 (SWB-R16, R-C950): the claim and handoff tables.
         claims::migrate(&db)?;
         for name in ["audit_hmac_key", "end_token_key", "session_token_key"] {
@@ -604,23 +767,10 @@ impl Store {
     /// can bring the binding or its old token back. Only a new `register`
     /// with `bind: true` binds the key again, under a new token.
     fn live_binding(db: &Connection, agent_id: &str, now: i64) -> StoreResult<Option<Binding>> {
-        let [harness, host, _, session] = match agent_id.splitn(4, ':').collect::<Vec<_>>()[..] {
-            [a, b, c, d] => [a, b, c, d],
-            _ => return Ok(None),
-        };
-        let row: Option<BindingRow> = db
-            .query_row(
-                "SELECT agent_id, token_nonce, bound, ended, last_seen FROM sessions
-                 WHERE harness=?1 AND host=?2 AND session_id=?3
-                 ORDER BY registered_seq DESC, agent_id DESC LIMIT 1",
-                params![harness, host, session],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-            )
-            .optional()
-            .map_err(sql_err)?;
-        Ok(match row {
-            Some((agent_id, Some(nonce), 1, 0, seen)) if seen >= now - IDLE_MAX_AGE_SECONDS => {
-                Some(Binding { agent_id, nonce })
+        Ok(match latest_key_row(db, agent_id)? {
+            Some(row) if is_live_binding(&row, now) => {
+                let (agent_id, nonce, ..) = row;
+                nonce.map(|nonce| Binding { agent_id, nonce })
             }
             Some((agent_id, _, 1, _, _)) => {
                 db.execute("UPDATE sessions SET bound=0 WHERE agent_id=?1", [&agent_id])
@@ -699,8 +849,10 @@ impl Store {
         Ok(())
     }
     /// Take one send from `sender`'s token bucket, or answer
-    /// [`ErrorKind::RateLimited`] with the seconds until the next one. An
-    /// invalid sender passes, so `send` itself reports it.
+    /// [`ErrorKind::RateLimited`] with the seconds until the next one, in
+    /// the message and in `retry_after`. A refusal is counted by the
+    /// sender's harness kind (TIN-7577). An invalid sender passes, so `send`
+    /// itself reports it.
     pub fn admit_send(&self, sender: &str) -> StoreResult<()> {
         if !valid_agent_id(sender) {
             return Ok(());
@@ -710,14 +862,22 @@ impl Store {
             .2
             .lock()
             .map_err(|_| StoreError::new(ErrorKind::Internal, "limiter lock poisoned"))?;
-        limiter.admit(sender, now).map_err(|wait| {
-            let message = if wait == u64::MAX {
-                "rate limited".to_owned()
-            } else {
-                format!("rate limited; retry in {wait} s")
-            };
-            StoreError::new(ErrorKind::RateLimited, message)
-        })
+        match limiter.admit(sender, now) {
+            Ok(()) => Ok(()),
+            Err(wait) => {
+                let kind = sender.split(':').next().unwrap_or_default();
+                if let Some(i) = HARNESS_KINDS.iter().position(|k| *k == kind) {
+                    limiter.refused[i] = limiter.refused[i].saturating_add(1);
+                }
+                let message = if wait == u64::MAX {
+                    "rate limited".to_owned()
+                } else {
+                    format!("rate limited; retry in {wait} s")
+                };
+                Err(StoreError::new(ErrorKind::RateLimited, message)
+                    .with_retry_after((wait != u64::MAX).then_some(wait)))
+            }
+        }
     }
     /// Register (or re-register) a self-asserted session and return its
     /// agent id, lease and end token (R-C944). Every registration mints a
@@ -904,15 +1064,17 @@ impl Store {
         }
         let mut stmt = db
             .prepare(
+                // A4 (TIN-7577): the proc_start filter runs before the
+                // one-row-per-session dedupe, so two live processes of one
+                // session each find their own row.
                 "WITH latest AS (
-                   SELECT agent_id,harness,host,proc_start,last_seen,ended,bound,
+                   SELECT agent_id,harness,host,last_seen,ended,bound,
                      ROW_NUMBER() OVER (PARTITION BY harness,host,COALESCE(session_id,agent_id)
                                         ORDER BY registered_seq DESC, agent_id DESC) AS pos
-                   FROM sessions)
+                   FROM sessions WHERE (?7 IS NULL OR proc_start=?7))
                  SELECT agent_id,harness,host,last_seen,ended,bound FROM latest
                  WHERE pos=1 AND (?1 IS NULL OR host=?1) AND (?2 IS NULL OR agent_id>?2)
                    AND (?3 OR (ended=0 AND last_seen>=?4-?5))
-                   AND (?7 IS NULL OR proc_start=?7)
                  ORDER BY agent_id LIMIT ?6",
             )
             .map_err(sql_err)?;
@@ -963,12 +1125,11 @@ impl Store {
         if !valid_agent_id(sender) || !valid_agent_id(recipient) {
             return Err("invalid agent id".into());
         }
-        let body = clean(
-            input
-                .get("body")
-                .and_then(Value::as_str)
-                .ok_or("missing body")?,
-        );
+        let raw_body = input
+            .get("body")
+            .and_then(Value::as_str)
+            .ok_or("missing body")?;
+        let body = clean_body(raw_body);
         if body.len() > 16384 {
             return Err("body exceeds 16 KiB".into());
         }
@@ -1103,26 +1264,31 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_err)?;
         Self::gate(&tx, sender, session_token, now)?;
-        let old: Option<(String, String, String)> = tx
+        let old: Option<(String, String, String, String, bool)> = tx
             .query_row(
-                "SELECT sender,body,envelope FROM messages WHERE msg_id=?1",
+                "SELECT sender,body,envelope,recipient,body_lines FROM messages WHERE msg_id=?1",
                 [&msg_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .optional()
             .map_err(sql_err)?;
-        if let Some((old_sender, old_body, envelope)) = old {
+        if let Some((old_sender, old_body, envelope, old_recipient, old_lines)) = old {
             // SWB-R46: disclose neither the stored receipt nor its metadata on conflict.
-            if old_sender != sender || old_body != body {
+            if old_sender != sender || !same_body(&old_body, old_lines, &body, raw_body) {
                 return Err(StoreError::new(ErrorKind::Conflict, "msg_id conflict"));
             }
             let envelope = serde_json::from_str(&envelope)
                 .map_err(|e| StoreError::new(ErrorKind::Internal, e.to_string()))?;
             touch(&tx, sender, now)?;
+            // The stored recipient, not this request's `to`: a replay answers
+            // for the envelope it returns, so it cannot probe another id
+            // without spending a bucket token (TIN-7577).
+            let recipient_state = recipient_state_of(&tx, &old_recipient, now)?;
             tx.commit().map_err(sql_err)?;
             return Ok(SendOutcome {
                 envelope,
                 created: false,
+                recipient_state,
             });
         }
         self.admit_send(sender)?;
@@ -1180,15 +1346,26 @@ impl Store {
             )
             .map_err(sql_err)?;
         map.insert("expires_at".into(), json!(expires_at));
-        tx.execute("INSERT INTO messages(msg_id,thread_id,seq,sender,recipient,body,envelope,created_at,expires_at,recipient_key)
-                    VALUES(?1,?2,?3,?4,?5,?6,?7,?9,?9+?8,?10)",
-            params![msg_id,thread_id,seq,sender,recipient,body,envelope.to_string(),i64::from(ttl)*3600,now,delivery_key(recipient)]).map_err(sql_err)?;
+        // v0.5.1 (TIN-7577): the message's arrival position for inbox paging.
+        tx.execute("INSERT INTO counters(name,value) VALUES('arrival_seq',1) ON CONFLICT(name) DO UPDATE SET value=value+1",[]).map_err(sql_err)?;
+        let arrival: i64 = tx
+            .query_row(
+                "SELECT value FROM counters WHERE name='arrival_seq'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(sql_err)?;
+        tx.execute("INSERT INTO messages(msg_id,thread_id,seq,sender,recipient,body,envelope,created_at,expires_at,recipient_key,arrival_seq,body_lines)
+                    VALUES(?1,?2,?3,?4,?5,?6,?7,?9,?9+?8,?10,?11,1)",
+            params![msg_id,thread_id,seq,sender,recipient,body,envelope.to_string(),i64::from(ttl)*3600,now,delivery_key(recipient),arrival]).map_err(sql_err)?;
         tx.execute("INSERT INTO counters(name,value) VALUES('messages_total',1) ON CONFLICT(name) DO UPDATE SET value=value+1",[]).map_err(sql_err)?;
         touch(&tx, sender, now)?;
+        let recipient_state = recipient_state_of(&tx, recipient, now)?;
         tx.commit().map_err(sql_err)?;
         Ok(SendOutcome {
             envelope,
             created: true,
+            recipient_state,
         })
     }
     /// Fetch `me`'s unacknowledged messages, as an unbound caller (no
@@ -1208,8 +1385,27 @@ impl Store {
         limit: u32,
         session_token: Option<&str>,
     ) -> StoreResult<Value> {
+        self.inbox_page(me, limit, None, session_token)
+    }
+    /// One page of `me`'s unacknowledged messages, oldest first in arrival
+    /// order (A1, TIN-7577). `after` names a message of this mailbox, in any
+    /// state, and the page starts after it. An id this mailbox never held,
+    /// another mailbox's id and a pruned id all answer `unknown after`.
+    /// The result carries `next_after`: the last msg_id when the page is
+    /// full, so a caller can walk past messages it already holds; `null`
+    /// otherwise. Binding works as in [`Store::inbox_as`].
+    pub fn inbox_page(
+        &self,
+        me: &str,
+        limit: u32,
+        after: Option<&str>,
+        session_token: Option<&str>,
+    ) -> StoreResult<Value> {
         if !valid_agent_id(me) {
             return Err("invalid agent id".into());
+        }
+        if after.is_some_and(|id| !valid_ulid(id)) {
+            return Err("invalid after".into());
         }
         let mut db = self.db()?;
         let now = self.now();
@@ -1218,24 +1414,48 @@ impl Store {
             .map_err(sql_err)?;
         tx.execute("UPDATE messages SET state='expired' WHERE state!='acked' AND state!='expired' AND expires_at<=?1",[now]).map_err(sql_err)?;
         let by_key = Self::gate(&tx, me, session_token, now)?;
+        let target = if by_key {
+            delivery_key(me)
+        } else {
+            me.to_owned()
+        };
+        let floor: Option<i64> = match after {
+            None => None,
+            Some(id) => {
+                let sql = if by_key {
+                    "SELECT arrival_seq FROM messages WHERE msg_id=?1 AND recipient_key=?2"
+                } else {
+                    "SELECT arrival_seq FROM messages WHERE msg_id=?1 AND recipient=?2"
+                };
+                let found: Option<Option<i64>> = tx
+                    .query_row(sql, params![id, target], |r| r.get(0))
+                    .optional()
+                    .map_err(sql_err)?;
+                Some(
+                    found
+                        .flatten()
+                        .ok_or_else(|| StoreError::new(ErrorKind::Invalid, "unknown after"))?,
+                )
+            }
+        };
         let messages: Vec<(String, String)> = {
             let sql = if by_key {
-                "SELECT msg_id,envelope FROM messages WHERE recipient_key=?1 AND state IN ('queued','notified','fetched') ORDER BY created_at,seq LIMIT ?2"
+                "SELECT msg_id,envelope FROM messages WHERE recipient_key=?1 AND state IN ('queued','notified','fetched') AND (?3 IS NULL OR arrival_seq>?3) ORDER BY arrival_seq,created_at,seq LIMIT ?2"
             } else {
-                "SELECT msg_id,envelope FROM messages WHERE recipient=?1 AND state IN ('queued','notified','fetched') ORDER BY created_at,seq LIMIT ?2"
-            };
-            let target = if by_key {
-                delivery_key(me)
-            } else {
-                me.to_owned()
+                "SELECT msg_id,envelope FROM messages WHERE recipient=?1 AND state IN ('queued','notified','fetched') AND (?3 IS NULL OR arrival_seq>?3) ORDER BY arrival_seq,created_at,seq LIMIT ?2"
             };
             let mut stmt = tx.prepare(sql).map_err(sql_err)?;
             let rows = stmt
-                .query_map(params![target, limit.min(100)], |r| {
+                .query_map(params![target, limit.min(100), floor], |r| {
                     Ok((r.get(0)?, r.get(1)?))
                 })
                 .map_err(sql_err)?;
             rows.collect::<Result<_, _>>().map_err(sql_err)?
+        };
+        let next_after = if limit > 0 && messages.len() == limit.min(100) as usize {
+            messages.last().map(|(id, _)| id.clone())
+        } else {
+            None
         };
         for (id, _) in &messages {
             tx.execute("UPDATE messages SET state='fetched',delivery_count=delivery_count+1 WHERE msg_id=?1",[id]).map_err(sql_err)?;
@@ -1258,7 +1478,7 @@ impl Store {
             })
             .collect::<StoreResult<Vec<_>>>()?;
         tx.commit().map_err(sql_err)?;
-        Ok(json!({"messages":values}))
+        Ok(json!({"messages":values,"next_after":next_after}))
     }
     /// The thread id, seq, in_reply_to and ticket of a stored message, for
     /// the broker's audit line (ADR-0002 L1-lite). Metadata only, never the
@@ -1366,9 +1586,29 @@ impl Store {
             .optional()
             .map_err(sql_err)?
             .unwrap_or(0);
-        Ok(format!(
+        let mut text = format!(
             "# TYPE swb_messages_total counter\nswb_messages_total {sent}\n# TYPE swb_mailbox_unacked gauge\nswb_mailbox_unacked {unacked}\n# TYPE swb_sessions gauge\nswb_sessions{{state=\"live\"}} {live}\n# TYPE swb_claims_active gauge\nswb_claims_active {claims_active}\n# TYPE swb_claim_overlaps gauge\nswb_claim_overlaps {claim_overlaps}\n# TYPE swb_handoffs_total counter\nswb_handoffs_total {handoffs}\n"
-        ))
+        );
+        // TIN-7577: send refusals by harness kind and the limit's settings.
+        // The lock order is the store, then the limiter, as in send_as.
+        // No series carries an agent id.
+        let limiter = self
+            .2
+            .lock()
+            .map_err(|_| StoreError::new(ErrorKind::Internal, "limiter lock poisoned"))?;
+        text.push_str("# TYPE swb_send_rate_limited_total counter\n");
+        for (kind, count) in HARNESS_KINDS.iter().zip(limiter.refused) {
+            text.push_str(&format!(
+                "swb_send_rate_limited_total{{harness=\"{kind}\"}} {count}\n"
+            ));
+        }
+        text.push_str(&format!(
+            "# TYPE swb_send_limit_burst gauge\nswb_send_limit_burst {}\n# TYPE swb_send_limit_refill_per_minute gauge\nswb_send_limit_refill_per_minute {}\n# TYPE swb_send_buckets gauge\nswb_send_buckets {}\n",
+            limiter.limit.burst,
+            limiter.limit.refill_per_minute,
+            limiter.buckets_held()
+        ));
+        Ok(text)
     }
 }
 #[cfg(test)]
@@ -1992,6 +2232,67 @@ mod tests {
         assert_eq!(SendLimit::default().burst, SEND_BURST_DEFAULT);
     }
 
+    /// TIN-7577: refusals are counted by harness kind, and /metrics shows
+    /// them with the limit settings, with no agent id.
+    #[test]
+    fn rate_limit_refusals_are_counted_by_harness_kind() {
+        let (s, _clock) = clocked();
+        s.set_send_limit(SendLimit {
+            burst: 1,
+            refill_per_minute: 6,
+        })
+        .unwrap();
+        for sender in ["claude:host-a:1:a", "codex:host-b:2:b"] {
+            s.admit_send(sender).unwrap();
+            let refused = s.admit_send(sender).unwrap_err();
+            assert_eq!(refused.kind, ErrorKind::RateLimited);
+            assert_eq!(refused.retry_after, Some(10));
+            assert_eq!(refused, "rate limited; retry in 10 s");
+        }
+        let text = s.metrics().unwrap();
+        for line in [
+            "# TYPE swb_send_rate_limited_total counter\n",
+            "swb_send_rate_limited_total{harness=\"claude\"} 1\n",
+            "swb_send_rate_limited_total{harness=\"codex\"} 1\n",
+            "swb_send_rate_limited_total{harness=\"kimi\"} 0\n",
+            "swb_send_limit_burst 1\n",
+            "swb_send_limit_refill_per_minute 6\n",
+            "swb_send_buckets 2\n",
+        ] {
+            assert!(text.contains(line), "{line:?} not in {text}");
+        }
+        assert_eq!(
+            text.matches("swb_send_rate_limited_total{").count(),
+            HARNESS_KINDS.len()
+        );
+        assert!(
+            !text.contains("host-a") && !text.contains("host-b"),
+            "{text}"
+        );
+        // Other errors carry no retry_after.
+        assert_eq!(StoreError::new(ErrorKind::Invalid, "x").retry_after, None);
+    }
+
+    #[test]
+    fn retry_after_is_none_when_the_bucket_never_refills() {
+        let s = Store::memory().unwrap();
+        s.set_send_limit(SendLimit {
+            burst: 1,
+            refill_per_minute: 0,
+        })
+        .unwrap();
+        let me = "pi:host-b:2:b";
+        s.admit_send(me).unwrap();
+        let refused = s.admit_send(me).unwrap_err();
+        assert_eq!(refused, "rate limited");
+        assert_eq!(refused.retry_after, None);
+        assert!(
+            s.metrics()
+                .unwrap()
+                .contains("swb_send_rate_limited_total{harness=\"pi\"} 1\n")
+        );
+    }
+
     #[test]
     fn an_older_store_gains_delivery_keys_for_its_messages() {
         let path = std::env::temp_dir().join(format!("swb-key-{}.sqlite3", Ulid::new()));
@@ -2031,6 +2332,205 @@ mod tests {
             )
             .unwrap();
         assert_eq!(read["messages"][0]["msg_id"], id.as_str());
+        drop(s);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+    }
+
+    /// A ULID string with the given value. A small value gives a small,
+    /// canonical id, so a test can choose the msg_id order.
+    fn ulid_of(value: u128) -> String {
+        Ulid(value << 80).to_string()
+    }
+
+    fn no_send_limit(s: &Store) {
+        s.set_send_limit(SendLimit {
+            burst: 0,
+            refill_per_minute: 0,
+        })
+        .unwrap();
+    }
+
+    fn page_ids(page: &Value) -> Vec<String> {
+        page["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["msg_id"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    /// A1 (TIN-7577): a reader walks past a full page of messages it holds.
+    #[test]
+    fn inbox_pages_past_a_full_page_with_next_after() {
+        let (s, _clock) = clocked();
+        no_send_limit(&s);
+        let to = "pi:host-b:2:b";
+        // The msg_ids fall as the sends go on, and every send lands in one
+        // second, so neither msg_id nor created_at gives the send order.
+        let ids: Vec<String> = (0..20u128).map(|n| ulid_of(1000 - n)).collect();
+        for (n, id) in ids.iter().enumerate() {
+            s.send(&json!({"from":"claude:host-a:1:a","to":to,"ticket":"none",
+                "body":format!("m{n}"),"msg_id":id}))
+                .unwrap();
+        }
+        let first = s.inbox_page(to, 8, None, None).unwrap();
+        assert_eq!(page_ids(&first), ids[..8].to_vec());
+        assert_eq!(first["next_after"], ids[7].as_str());
+        let second = s.inbox_page(to, 8, Some(ids[7].as_str()), None).unwrap();
+        assert_eq!(page_ids(&second), ids[8..16].to_vec());
+        assert_eq!(second["next_after"], ids[15].as_str());
+        let third = s.inbox_page(to, 8, Some(ids[15].as_str()), None).unwrap();
+        assert_eq!(page_ids(&third), ids[16..].to_vec());
+        assert_eq!(third["next_after"], Value::Null);
+        // The head page stays the same 8 while they are unacknowledged.
+        let head = s.inbox(to, 8).unwrap();
+        assert_eq!(page_ids(&head), ids[..8].to_vec());
+        assert_eq!(head["next_after"], ids[7].as_str());
+    }
+
+    #[test]
+    fn a_send_after_the_cursor_is_never_skipped() {
+        let (s, _clock) = clocked();
+        no_send_limit(&s);
+        let to = "pi:host-b:2:b";
+        let send = |id: &str| {
+            s.send(
+                &json!({"from":"claude:host-a:1:a","to":to,"ticket":"none","body":"x","msg_id":id}),
+            )
+            .unwrap();
+        };
+        let high = ulid_of(9000);
+        let low = ulid_of(1);
+        send(&high);
+        let page = s.inbox_page(to, 1, None, None).unwrap();
+        assert_eq!(page["next_after"], high.as_str());
+        // A later send in the same second, with a smaller msg_id.
+        send(&low);
+        let next = s.inbox_page(to, 1, Some(high.as_str()), None).unwrap();
+        assert_eq!(page_ids(&next), vec![low.clone()]);
+    }
+
+    #[test]
+    fn after_must_name_a_message_of_this_mailbox() {
+        let s = Store::memory().unwrap();
+        let (a, b) = ("pi:host-b:2:b", "codex:host-b:3:c");
+        let sent = |to: &str| {
+            s.send(&json!({"from":"claude:host-a:1:a","to":to,"ticket":"none","body":"x"}))
+                .unwrap()
+                .envelope["msg_id"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let mine = sent(a);
+        let theirs = sent(b);
+        for foreign in [theirs, Ulid::new().to_string()] {
+            let error = s
+                .inbox_page(a, 8, Some(foreign.as_str()), None)
+                .unwrap_err();
+            assert_eq!(error.kind, ErrorKind::Invalid);
+            assert_eq!(error, "unknown after");
+        }
+        assert_eq!(
+            s.inbox_page(a, 8, Some("nope"), None).unwrap_err(),
+            "invalid after"
+        );
+        // An acknowledged cursor still resolves.
+        s.ack(a, &mine).unwrap();
+        let page = s.inbox_page(a, 8, Some(mine.as_str()), None).unwrap();
+        assert!(page["messages"].as_array().unwrap().is_empty());
+        assert_eq!(page["next_after"], Value::Null);
+    }
+
+    #[test]
+    fn a_bound_mailbox_pages_by_delivery_key() {
+        let s = Store::memory().unwrap();
+        let first = bind(&s, "hermes", "host-b", 100, "svc", None).unwrap();
+        let old = first["agent_id"].as_str().unwrap().to_owned();
+        let send = |body: &str| {
+            s.send(&json!({"from":"claude:host-a:1:a","to":old,"ticket":"none","body":body}))
+                .unwrap()
+                .envelope["msg_id"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let cursor = send("one");
+        send("two");
+        let second = bind(&s, "hermes", "host-b", 200, "svc", Some(&token_of(&first))).unwrap();
+        let new = second["agent_id"].as_str().unwrap();
+        let token = token_of(&second);
+        let page = s
+            .inbox_page(new, 8, Some(cursor.as_str()), Some(&token))
+            .unwrap();
+        assert_eq!(page["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(page["messages"][0]["body"], "two");
+        assert_eq!(
+            s.inbox_page(new, 8, Some(cursor.as_str()), None)
+                .unwrap_err()
+                .kind,
+            ErrorKind::Unauthorized
+        );
+    }
+
+    #[test]
+    fn an_older_store_gains_arrival_positions_in_send_order() {
+        let path = std::env::temp_dir().join(format!("swb-arrival-{}.sqlite3", Ulid::new()));
+        let first;
+        let second;
+        {
+            let s = Store::open(&path).unwrap();
+            let send = |body: &str| {
+                s.send(&json!({"from":"claude:host-a:1:a","to":"pi:host-b:2:b","ticket":"none","body":body}))
+                    .unwrap()
+                    .envelope["msg_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            };
+            first = send("one");
+            second = send("two");
+            s.0.lock()
+                .unwrap()
+                .execute_batch(
+                    "UPDATE messages SET arrival_seq=NULL; DELETE FROM counters WHERE name='arrival_seq';",
+                )
+                .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        let db = s.0.lock().unwrap();
+        let positions: Vec<(String, i64)> = db
+            .prepare("SELECT msg_id, arrival_seq FROM messages ORDER BY arrival_seq")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(positions, vec![(first, 1), (second, 2)]);
+        let counter: i64 = db
+            .query_row(
+                "SELECT value FROM counters WHERE name='arrival_seq'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(counter, 2);
+        drop(db);
+        let third = s
+            .send(&json!({"from":"claude:host-a:1:a","to":"pi:host-b:2:b","ticket":"none","body":"three"}))
+            .unwrap();
+        let position: i64 =
+            s.0.lock()
+                .unwrap()
+                .query_row(
+                    "SELECT arrival_seq FROM messages WHERE msg_id=?1",
+                    [third.envelope["msg_id"].as_str().unwrap()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+        assert_eq!(position, 3);
         drop(s);
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(format!("{}-wal", path.display()));
@@ -2174,6 +2674,254 @@ mod tests {
             .unwrap_err(),
             "invalid host"
         );
+    }
+
+    /// A4 (TIN-7577): two live processes of one session each find their
+    /// own row by proc_start; without a filter the latest one wins.
+    #[test]
+    fn peers_filters_proc_start_before_it_keeps_one_row_per_session() {
+        let s = Store::memory().unwrap();
+        reg(&s, "claude", "host-b", 1, "shared", "p1");
+        reg(&s, "claude", "host-b", 2, "shared", "p2");
+        let ids = |proc_start: Option<&str>| -> Vec<String> {
+            let page = s
+                .peers(&PeersQuery {
+                    proc_start,
+                    ..PeersQuery::default()
+                })
+                .unwrap();
+            page["peers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p["agent_id"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(ids(Some("p1")), vec!["claude:host-b:1:shared"]);
+        assert_eq!(ids(Some("p2")), vec!["claude:host-b:2:shared"]);
+        assert_eq!(ids(None), vec!["claude:host-b:2:shared"]);
+        // pid 1 registers again: it is now the latest, and pid 2 still
+        // finds its own row.
+        reg(&s, "claude", "host-b", 1, "shared", "p1");
+        assert_eq!(ids(Some("p2")), vec!["claude:host-b:2:shared"]);
+        assert_eq!(ids(Some("p1")), vec!["claude:host-b:1:shared"]);
+        assert_eq!(ids(None), vec!["claude:host-b:1:shared"]);
+        assert!(ids(Some("p3")).is_empty());
+    }
+
+    /// A5 (TIN-7577): a send reports where mail to its recipient stands,
+    /// and the stored envelope never carries it.
+    #[test]
+    fn send_reports_the_recipient_state() {
+        let (s, clock) = clocked();
+        let to = "pi:host-b:2:b";
+        let send = |body: &str| {
+            s.send(&json!({"from":"claude:host-a:1:a","to":to,"ticket":"none","body":body}))
+                .unwrap()
+        };
+        assert_eq!(send("before").recipient_state, "unregistered");
+        let row = reg(&s, "pi", "host-b", 2, "b", "p");
+        assert_eq!(send("live").recipient_state, "live");
+        clock.advance(901);
+        assert_eq!(send("idle").recipient_state, "idle");
+        clock.advance(20_700);
+        assert_eq!(send("gone").recipient_state, "gone");
+        s.end(to, row["end_token"].as_str().unwrap()).unwrap();
+        let msg = json!({"from":"claude:host-a:1:a","to":to,"ticket":"none","body":"ended",
+            "msg_id":Ulid::new().to_string()});
+        let first = s.send(&msg).unwrap();
+        assert!(first.created);
+        assert_eq!(first.recipient_state, "ended");
+        // A replay carries it too.
+        let replay = s.send(&msg).unwrap();
+        assert!(!replay.created);
+        assert_eq!(replay.recipient_state, "ended");
+        assert!(replay.envelope.get("recipient_state").is_none());
+        // A replay that names another `to` answers for the stored
+        // recipient, not for the id it names.
+        reg(&s, "codex", "host-b", 3, "c", "p");
+        let mut elsewhere = msg.clone();
+        elsewhere["to"] = json!("codex:host-b:3:c");
+        let replay = s.send(&elsewhere).unwrap();
+        assert!(!replay.created);
+        assert_eq!(replay.envelope["to"], to);
+        assert_eq!(replay.recipient_state, "ended");
+        // A submitted envelope never carries recipient_state.
+        let mut forged = msg.clone();
+        forged["msg_id"] = json!(Ulid::new().to_string());
+        forged["recipient_state"] = json!("live");
+        assert_eq!(s.send(&forged).unwrap_err(), "unknown envelope field");
+        let read = s.inbox(to, 10).unwrap();
+        let messages = read["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 5);
+        assert!(messages.iter().all(|m| m.get("recipient_state").is_none()));
+    }
+
+    /// TIN-7577: a body keeps its newlines and tabs through send, inbox
+    /// and thread. CRLF becomes LF; a lone CR and every other control
+    /// character are dropped.
+    #[test]
+    fn a_body_keeps_its_lines_through_the_store() {
+        let s = Store::memory().unwrap();
+        let (from, to) = ("claude:host-a:1:a", "pi:host-b:2:b");
+        // `thread` answers a registered reader only.
+        reg(&s, "pi", "host-b", 2, "b", "p");
+        let raw = "line one\r\n\tindented\nlast\rx\u{1b}[2J\u{7}\u{85}\0end\n";
+        let want = "line one\n\tindented\nlastx[2Jend\n";
+        let sent = s
+            .send(&json!({"from":from,"to":to,"ticket":"none","body":raw}))
+            .unwrap();
+        assert!(sent.created);
+        assert_eq!(sent.envelope["body"], want);
+        let stored: String =
+            s.0.lock()
+                .unwrap()
+                .query_row("SELECT body FROM messages", [], |r| r.get(0))
+                .unwrap();
+        assert_eq!(stored, want);
+        let read = s.inbox(to, 10).unwrap();
+        assert_eq!(read["messages"][0]["body"], want);
+        let thread_id = sent.envelope["thread_id"].as_str().unwrap();
+        let thread = s.thread(to, thread_id, None, None).unwrap();
+        assert_eq!(thread["messages"][0]["body"], want);
+        // A body of only line breaks and tabs is kept as sent.
+        let blank = s
+            .send(&json!({"from":from,"to":to,"ticket":"none","body":"\n\t\n"}))
+            .unwrap();
+        assert_eq!(blank.envelope["body"], "\n\t\n");
+        // The 16 KiB limit counts the cleaned body: dropped CRs do not count.
+        let long = format!("{}{}", "a".repeat(16384), "\r".repeat(10));
+        let kept = s
+            .send(&json!({"from":from,"to":to,"ticket":"none","body":long}))
+            .unwrap();
+        assert_eq!(kept.envelope["body"].as_str().unwrap().len(), 16384);
+        let over = format!("{}\n", "a".repeat(16384));
+        assert_eq!(
+            s.send(&json!({"from":from,"to":to,"ticket":"none","body":over}))
+                .unwrap_err(),
+            "body exceeds 16 KiB"
+        );
+    }
+
+    /// TIN-7577: a retry of a message that v0.5.0 or older stored without
+    /// its newlines is still a replay after the upgrade. The store is
+    /// opened once in the v0.5.0 shape, with a flat body and no
+    /// `body_lines` column, and the upgrade adds the column at 0. Any other
+    /// body under that msg_id is still a conflict (SWB-R46).
+    #[test]
+    fn a_retry_of_a_message_stored_before_v051_without_newlines_is_a_replay() {
+        let path = std::env::temp_dir().join(format!("swb-lines-{}.sqlite3", Ulid::new()));
+        let msg_id = Ulid::new().to_string();
+        let msg = json!({"from":"claude:host-a:1:a","to":"pi:host-b:2:b","ticket":"none",
+            "body":"one\ntwo","msg_id":msg_id});
+        {
+            let s = Store::open(&path).unwrap();
+            assert!(s.send(&msg).unwrap().created);
+            s.0.lock()
+                .unwrap()
+                .execute_batch(
+                    "UPDATE messages SET body='onetwo'; ALTER TABLE messages DROP COLUMN body_lines;",
+                )
+                .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        let lines: i64 =
+            s.0.lock()
+                .unwrap()
+                .query_row("SELECT body_lines FROM messages", [], |r| r.get(0))
+                .unwrap();
+        assert_eq!(lines, 0);
+        assert!(!s.send(&msg).unwrap().created);
+        let mut tab = msg.clone();
+        tab["body"] = json!("one\ttwo");
+        assert!(!s.send(&tab).unwrap().created);
+        let mut flat = msg.clone();
+        flat["body"] = json!("onetwo");
+        assert!(!s.send(&flat).unwrap().created);
+        let mut other = msg.clone();
+        other["body"] = json!("one\nthree");
+        assert_eq!(s.send(&other).unwrap_err().kind, ErrorKind::Conflict);
+        drop(s);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+    }
+
+    /// TIN-7577: a body that v0.5.1 stored is compared exactly. A retry that
+    /// adds a newline, tab or CRLF to a flat body is a conflict, and so is a
+    /// flat retry of a multi-line body (SWB-R46).
+    #[test]
+    fn a_retry_that_changes_the_lines_of_a_v051_body_is_a_conflict() {
+        let s = Store::memory().unwrap();
+        let send = |body: &str, msg_id: &str| {
+            s.send(
+                &json!({"from":"claude:host-a:1:a","to":"pi:host-b:2:b","ticket":"none",
+                "body":body,"msg_id":msg_id}),
+            )
+        };
+        let flat_id = Ulid::new().to_string();
+        assert!(send("onetwo", &flat_id).unwrap().created);
+        for retry in ["one\ntwo", "one\ttwo", "one\r\ntwo", "onetwo\n"] {
+            assert_eq!(
+                send(retry, &flat_id).unwrap_err().kind,
+                ErrorKind::Conflict,
+                "{retry:?}"
+            );
+        }
+        assert!(!send("onetwo", &flat_id).unwrap().created);
+        let multi_id = Ulid::new().to_string();
+        assert!(send("one\ntwo", &multi_id).unwrap().created);
+        for retry in ["onetwo", "one\ttwo", "one\n\ntwo"] {
+            assert_eq!(
+                send(retry, &multi_id).unwrap_err().kind,
+                ErrorKind::Conflict,
+                "{retry:?}"
+            );
+        }
+        // CRLF is stored as LF, so the same text sent with CRLF is a replay.
+        assert!(!send("one\r\ntwo", &multi_id).unwrap().created);
+        let lines: Vec<i64> =
+            s.0.lock()
+                .unwrap()
+                .prepare("SELECT body_lines FROM messages")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+        assert_eq!(lines, vec![1, 1]);
+    }
+
+    #[test]
+    fn a_live_binding_makes_mail_to_an_old_pid_live() {
+        let (s, clock) = clocked();
+        let first = bind(&s, "hermes", "host-b", 100, "svc", None).unwrap();
+        let old = first["agent_id"].as_str().unwrap().to_owned();
+        // The old pid goes quiet; the restarted service binds again.
+        clock.advance(1000);
+        bind(&s, "hermes", "host-b", 200, "svc", Some(&token_of(&first))).unwrap();
+        let state = |to: &str| {
+            s.send(&json!({"from":"claude:host-a:1:a","to":to,"ticket":"none","body":"x"}))
+                .unwrap()
+                .recipient_state
+        };
+        assert_eq!(state(&old), "live");
+        // A bound row without a token nonce is no binding to the inbox gate,
+        // so the old pid's own row decides.
+        s.0.lock()
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET token_nonce=NULL WHERE agent_id!=?1 AND harness='hermes'",
+                [&old],
+            )
+            .unwrap();
+        assert_eq!(state(&old), "idle");
+        // An unbound session that went quiet stays gone, and another pid
+        // of it with no row is unregistered.
+        reg(&s, "pi", "host-b", 2, "b", "p");
+        clock.advance(21_601);
+        assert_eq!(state("pi:host-b:2:b"), "gone");
+        assert_eq!(state("pi:host-b:3:b"), "unregistered");
     }
 
     #[test]

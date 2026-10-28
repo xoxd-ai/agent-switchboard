@@ -238,7 +238,8 @@ registered once on the tailnet so that new harness instances spawn nothing.
 - **Payload limits:**
   - the body is at most 16 KiB, and there are at most 20 artifact refs;
   - `ticket` must match `^TIN-\d+$|none`;
-  - control characters are stripped;
+  - control characters are stripped from the body, except newline and tab
+    (v0.5.1, TIN-7577); a carriage return is stripped, so CRLF becomes LF;
   - bodies are returned framed as teammate data and never pass through a
     shell.
 - **Audit (SWB-R19; additions 2026-09-25, SWB-R26 and SWB-R27):**

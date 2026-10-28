@@ -13,6 +13,106 @@ registry tag; the approved digest and its publication receipt are in
 
 ## [Unreleased]
 
+## [0.5.1] - Unreleased
+
+Scope ruling SPR-80 (TIN-7125 comment `2ff3e637`), tracking issue
+TIN-7577. The release chain is SWB-R73 (TIN-7577 comment `d59d35a1`).
+Release record: filled at the cut under SWB-R73. The workspace version
+and the lock files move to 0.5.1 in the release bump.
+
+### Upgrade notes
+
+- Envelope v3 is unchanged. Its schema changes only the `body`
+  description, which now says newline and tab are kept. Stored and delivered
+  envelopes keep the same keys. `recipient_state` is a send-result field,
+  described in REFERENCE, and a submitted envelope that carries it is
+  refused with `unknown envelope field`, as any unknown key is.
+- `swb send --in-reply-to` now acknowledges the original by default. A
+  script that used it to keep that message open must add `--no-ack`.
+- A v0.5.0 client against a v0.5.1 broker gets two extra keys it ignores:
+  `next_after` on `inbox` and `recipient_state` on `send`. The wider
+  `proc_start` filter fixes A4 for v0.5.0 channels as soon as the broker
+  upgrades.
+- A v0.5.1 client against a v0.5.0 or older broker: the channel sends
+  `after` only when the head page carried `next_after`, so it never sends
+  one there, and A1 stays open until the broker upgrades. A2 and A3 work
+  against any broker. No `recipient_state` arrives, so no A5 warning
+  shows. The channel `inbox` tool answers an error for `after`, because
+  that broker would return its head page instead.
+- The store gains `messages.arrival_seq`, two indexes and an
+  `arrival_seq` counter at startup. Existing messages get positions in
+  `created_at`, `seq` order. A downgrade to v0.5.0 runs: it writes rows
+  without a position, and the next v0.5.1 start fills them in.
+- An inbox now returns mail in arrival order. That matches the old
+  `created_at` order unless the broker's clock stepped back.
+- A message body keeps its newlines and tabs. A reader that split
+  `swb inbox` or REST output on raw line breaks is unaffected, because
+  that output is JSON and escapes them. `swb send` drops one trailing
+  line break from stdin, so a body sent with `printf '%s\n'` is stored
+  as before. A retry with `--msg-id` of a message a v0.5.0 broker stored
+  without its newlines is still a replay. A new `messages.body_lines`
+  column marks rows v0.5.1 writes, and only an older row matches a retry
+  in that flat form. A retry that changes a newline or tab of a v0.5.1
+  body is a conflict.
+
+### Fixed
+
+- **A1, paging stall.** The channel showed only the 8 oldest unacked
+  messages and never read past them. `inbox` now takes `after` and
+  returns `next_after`, in arrival order, and the channel poller walks
+  past a full page of messages it already emitted.
+- **A2, lost re-emit.** An ack or a reply that failed, for example during
+  a registration gap, left its message unacknowledged and never pushed
+  again. The channel now pushes it once more on a later read when the
+  failure may pass on a later try: no answer, 401, a 5xx or a session not
+  registered yet. A refusal such as 429 never re-emits, so a rate-limited
+  reply cannot loop.
+- **A3, `send --in-reply-to` left the original unread.** The CLI and the
+  full-mode `send` tool now acknowledge the original, as `reply` does.
+- **A4, `peers` dedupe before the proc_start filter.** Two live processes
+  of one session hid each other's rows. The filter now runs first.
+- **A5, send to a dead recipient.** A send now reports `recipient_state`,
+  and the clients warn when the recipient is not live. SPR-80 rules a
+  warning: the send still succeeds.
+- **Bodies lost their line breaks** (TIN-7577 comment `e2d6b6f5`). The
+  store removed every control character from a body, newline and tab
+  included, although the channel frame keeps both. The store now keeps
+  newline and tab. It removes every carriage return, so CRLF becomes LF
+  and a lone CR goes, and every other control character, as before. The
+  16 KiB limit counts the cleaned body. CLI and REST output stay one JSON
+  line per result, and the channel header stays the first paragraph of
+  its frame, so a body line cannot pass for a header or another message.
+
+### Added
+
+- `/metrics`: `swb_send_rate_limited_total{harness}` for every harness
+  kind, and the gauges `swb_send_limit_burst`,
+  `swb_send_limit_refill_per_minute` and `swb_send_buckets`. No series
+  carries an agent id.
+- A `send_refused` stdout line for each send the rate limit refuses, with
+  the harness kind, `retry_after` and the route, and no ids or body.
+- `inbox` takes `after` and returns `next_after` over REST, MCP and the
+  channel `inbox` tool.
+- `send` results carry `recipient_state`, and so does the send audit
+  line.
+- A 429 from a rate-limited send carries `retry_after` in its body and a
+  `Retry-After` header when the bucket refills.
+- `swb send --no-ack` and `swb inbox --after ULID`.
+- The full-mode channel `send` tool takes `ack`. The `reply` and full
+  `send` results carry `recipient_state` and a `warning` field.
+
+### Known gaps
+
+- The UserPromptSubmit hook notice still names the sender of the oldest
+  unacked message. With a stuck head page, a new message from another
+  peer gets a notice that names the older sender.
+- Default `peers` still lists one row per session, so a second live
+  process of one session shows only through its own `proc_start`. The
+  investigation's item 6 asked to show those rows too.
+- A channel walk that starts again rereads up to 4 pages it already
+  emitted, and each read counts a delivery and writes a `fetch` line. An
+  inbox read that counts no delivery would remove that cost.
+
 ## [0.5.0] - 2026-10-27
 
 Release record SWB-R71. Source `cfff7913` (the #55 merge), image
