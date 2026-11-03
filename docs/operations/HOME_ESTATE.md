@@ -41,18 +41,22 @@ in [PRODUCTIONIZATION.md](PRODUCTIONIZATION.md); SLIs in [SLO.md](SLO.md).
 
 ## Release state
 
-v0.4.0 (SWB-R64) is the current release. It keeps the v0.3.0 routes and
-adds the `hermes` and `kimicode` harness kinds, which a v0.3.0 broker or
-client refuses. blahaj main pins the SWB-R62 v0.3.0 digest
-([blahaj#2359](https://github.com/xoxd-ai/blahaj/pull/2359)). The live
-broker repin and the lab pin bump to v0.4.0 happen together, each by its
-owner (SWB-R63). v0.3.0 broke the v0.2 wire format; its lab changes are in
-[v0.3.0-migration.md](../releases/v0.3.0-migration.md). The approved
+v0.5.1 (SWB-R73) is the current release. It keeps envelope v3 and fixes
+delivery: `inbox` paging, `recipient_state` on a send and a 60 second
+grace for a replaced session token. v0.5.0 (SWB-R71) added opt-in sender
+binding ([ADR-0003](../adr/0003-sender-binding.md)) and a per-sender send
+rate limit. v0.4.0 (SWB-R64) added the `hermes` and `kimicode` harness
+kinds, which a v0.3.0 broker or client refuses. blahaj main pins the
+SWB-R71 v0.5.0 digest
+([blahaj#2374](https://github.com/xoxd-ai/blahaj/pull/2374)). The live
+broker repin and the lab pin bump to v0.5.1 each need their owner's
+change (SWB-R63, SWB-R73). v0.3.0 broke the v0.2 wire format; its lab
+changes are in [v0.3.0-migration.md](../releases/v0.3.0-migration.md). The approved
 digest, protected-input hashes and publication receipt are in
 [docs/releases/approved-broker.json](../releases/approved-broker.json);
 release history is in the [CHANGELOG](../../CHANGELOG.md). v0.1.0 (SWB-R55)
-was pushed by hand under R-C312; v0.2.1, v0.2.2, v0.3.0 and v0.4.0 were
-published by the release workflow.
+was pushed by hand under R-C312; v0.2.1, v0.2.2, v0.3.0, v0.4.0, v0.5.0
+and v0.5.1 were published by the release workflow.
 
 Publication is the signed-tag release workflow
 (`.github/workflows/release.yml`). It pushes only the approved digest in

@@ -109,7 +109,7 @@ self-bounded). `swb --help` prints usage on stdout and exits 0 from v0.3.0
    no longer end a session without registering it. It is not
    takeover-proof: anyone who can register can re-register any agent id,
    get a fresh token and end that session. See story 3 and
-   [SECURITY.md](../SECURITY.md). v0.5.0 (unreleased, SWB-R66) adds opt-in
+   [SECURITY.md](../SECURITY.md). v0.5.0 (SWB-R66) adds opt-in
    sender binding ([ADR-0003](adr/0003-sender-binding.md)): a bound
    session's calls need its session token, and nobody can take a live
    binding over by registering again. Unbound ids stay self-asserted.
