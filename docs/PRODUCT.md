@@ -21,8 +21,9 @@ and quickstart are the [README](../README.md), settings and verbs are
 
 ## User stories and acceptance
 
-Status: **holds** = true on `main` (v0.3.0, unreleased) unless a release is
-named; **gap** = not true yet. The current release is v0.2.2.
+Status: **holds** = true on `main` unless a release is named; **gap** = not
+true yet. The current release is v0.6.0 (SWB-R77), which adds the `agy`
+harness kind.
 
 1. **Run locally.** A contributor runs a loopback broker from the README.
    *Accept:* the README quickstart reaches send/inbox/ack between two ids in
@@ -56,7 +57,7 @@ named; **gap** = not true yet. The current release is v0.2.2.
    (R-C275). `swb inbox` returns one message per call.
 7. **Coordinate.** Agents claim, release and hand off work. *Accept:* the
    ADR-0001 claim/handoff tools exist and the QuickCheck claim properties
-   test Rust, not only the Haskell model. **Holds on `main`, unreleased**
+   test Rust, not only the Haskell model. **Holds since v0.3.0**
    (TIN-6690): all 12 tools, including claim, release, handoff and claims,
    with the R-C950 (SWB-R60) and SWB-R61 claim rules, and the live
    QuickCheck adapter runs claims against a broker. v0.2.2 ships 5 tools.

@@ -315,6 +315,17 @@ v0.3.0, with an install script that verifies them.
   `SWB_REQUIRE_SIGNATURE=1` and on aarch64-darwin with its checksum check,
   because the non-interactive Mac shell has no `gpg`. Both printed
   `swb 0.5.1 envelope v3`.
+- **v0.6.0 (SWB-R77)** (2026-11-21; receipt on TIN-4655). The release
+  workflow run
+  [44953780427](https://github.com/xoxd-ai/agent-switchboard/actions/runs/44953780427)
+  pushed `sha256:959ef4b4…` and read it back. `just release-binaries v0.6.0`
+  built Linux on sting and Darwin on PZM from `f2512fdd`, and the signed
+  `SHA256SUMS` verified against `release-signers.asc`. The GitHub release
+  was published at 2026-11-21T22:55:23Z, and its assets read back with
+  `sha256sum -c`. After publication, `install.sh v0.6.0` passed on
+  x86_64-linux with `SWB_REQUIRE_SIGNATURE=1` and on aarch64-darwin, where
+  the shell now has `gpg`, so install.sh checked the signature as well as
+  the checksum. Both printed `swb 0.6.0 envelope v3`.
 - The binaries are not part of the approved-broker record: that record and
   the release workflow pin only the OCI image. The binaries' hashes are in
   the signed `SHA256SUMS` and in the release receipt on TIN-6749.

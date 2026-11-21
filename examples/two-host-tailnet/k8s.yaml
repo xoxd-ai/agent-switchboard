@@ -8,7 +8,8 @@
 # operator's proxy pods (namespace `tailscale`; change it if yours differs).
 # It needs a CNI that enforces NetworkPolicy.
 #
-# Needs a v0.3.0 image digest you built (`just image`); none is published yet.
+# The broker image is the approved v0.6.0 digest
+# (docs/releases/approved-broker.json); `just image` builds another source.
 # One replica only: the store is one SQLite file.
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -42,7 +43,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: swb
-          image: ghcr.io/xoxd-ai/agent-switchboard@sha256:REPLACE_WITH_YOUR_V030_DIGEST
+          image: ghcr.io/xoxd-ai/agent-switchboard@sha256:959ef4b4c73d2c8d156202ef95f91362d1d153985734c41ca2bf7182fc99d0ed
           args: ["serve"]
           env:
             - {name: SWB_DB_PATH, value: /var/lib/swb/swb.sqlite3}

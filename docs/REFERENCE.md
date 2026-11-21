@@ -1,14 +1,16 @@
 # swb reference
 
-Settings, routes, tools and verbs for `swb` v0.5.1 (SWB-R73). v0.5.1 keeps
-envelope v3 and fixes delivery: `inbox` pages, a send reports
+Settings, routes, tools and verbs for `swb` v0.6.0 (SWB-R77). v0.6.0 adds
+the harness kind `agy` (SWB-R75) and `swb hook agy` (SWB-R76, SWB-R77),
+which a v0.5.1 broker or client refuses (see [Harness kinds](#harness-kinds)
+and the [CHANGELOG](../CHANGELOG.md) upgrade notes). v0.5.1 kept
+envelope v3 and fixed delivery: `inbox` pages, a send reports
 `recipient_state` and a replaced session token keeps a grace (see the
 [CHANGELOG](../CHANGELOG.md) upgrade notes). v0.5.0 added opt-in sender
 binding and a per-sender send rate limit (see
 [Sender binding](#sender-binding-v050)). v0.4.0 added the harness kinds
 `hermes` and `kimicode`, which a v0.3.0 broker or client refuses (see
-[Harness kinds](#harness-kinds)). The next release adds the kind `agy`
-(SWB-R75), which a v0.5.1 broker or client refuses. v0.3.0 broke the v0.2 wire
+[Harness kinds](#harness-kinds)). v0.3.0 broke the v0.2 wire
 format; what changed from v0.2.2 and the upgrade order are in
 [releases/v0.3.0-migration.md](releases/v0.3.0-migration.md). The design and
 its rulings are in [ADR-0001](adr/0001-agent-switchboard.md); a walkthrough

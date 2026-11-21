@@ -4,15 +4,15 @@
 
 | Version | Supported |
 | --- | --- |
-| 0.5.1 | Yes (current release) |
+| 0.6.0 | Yes (current release) |
 | `main` | Yes: fixes land here first |
-| 0.5.0 and earlier | No: upgrade to 0.5.1 |
+| 0.5.1 and earlier | No: upgrade to 0.6.0 |
 | 0.2.0 | Never published; do not use the tag |
 
 Pre-1.0, only the latest release and `main` get fixes. An older client
-can still talk to a 0.5.x broker: a 0.4.0 client works for unbound ids
-only, and a 0.5.0 client ignores the fields 0.5.1 adds. Those clients
-get no fixes.
+can still talk to a 0.6.0 broker: a 0.4.0 client works for unbound ids
+only, a 0.5.0 client ignores the fields 0.5.1 adds, and a 0.5.x client
+refuses agent ids of the kind `agy`. Those clients get no fixes.
 
 ## Deployment model: tailnet-only, no listener authentication
 

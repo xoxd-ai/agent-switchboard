@@ -19,11 +19,13 @@ points its `SWB_BROKER_URL` at the same broker.
 
 ## 1. Run the broker
 
-Pick one. Both need a v0.3.0 image digest: v0.3.0 is unreleased, so build
-the image on a linux/amd64 build host with `just image` and use the digest it
-prints. The approved v0.2.2 digest in
-[approved-broker.json](../../docs/releases/approved-broker.json) is for
-v0.2.2 clients only; broker and clients must run the same minor version.
+Pick one. Both pin the broker image by digest. The current release is
+v0.6.0, and its approved digest is in
+[approved-broker.json](../../docs/releases/approved-broker.json):
+`ghcr.io/xoxd-ai/agent-switchboard@sha256:959ef4b4c73d2c8d156202ef95f91362d1d153985734c41ca2bf7182fc99d0ed`.
+Broker and clients must run the same minor version, so install v0.6.0
+clients with it. To run another source, build the image on a linux/amd64
+build host with `just image` and use the digest it prints.
 
 - **Docker Compose**, [compose.yaml](compose.yaml): the broker shares a
   Tailscale sidecar's network namespace, binds `127.0.0.1:8080` there and

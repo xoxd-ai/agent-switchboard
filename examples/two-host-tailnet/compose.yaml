@@ -5,10 +5,11 @@
 # `tailscale serve` forwards tailnet :8080 to that loopback port
 # (serve.json), which makes the tailnet the only way in (R-C953, TIN-6694).
 #
-# Needs a v0.3.0 image. None is published yet (v0.3.0 is unreleased on main):
-# build one with `just image` on a linux/amd64 build host and put the digest it
-# prints below. Never use a mutable tag. Broker and every client must run the
-# same minor version.
+# The broker image below is the approved v0.6.0 digest
+# (docs/releases/approved-broker.json). To run another source, build one with
+# `just image` on a linux/amd64 build host and put the digest it prints below.
+# Never use a mutable tag. Broker and every client must run the same minor
+# version.
 #
 #   TS_AUTHKEY=... docker compose up -d     # the auth key comes from your shell
 #                                           # or an untracked .env, never this file
@@ -43,7 +44,7 @@ services:
     restart: "no"
 
   swb:
-    image: ghcr.io/xoxd-ai/agent-switchboard@sha256:REPLACE_WITH_YOUR_V030_DIGEST
+    image: ghcr.io/xoxd-ai/agent-switchboard@sha256:959ef4b4c73d2c8d156202ef95f91362d1d153985734c41ca2bf7182fc99d0ed
     command: ["serve"]
     # Share the sidecar's network namespace and bind loopback only. The
     # namespace also has the bridge interface (eth0), so 0.0.0.0 would expose
